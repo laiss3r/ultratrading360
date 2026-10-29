@@ -1,0 +1,85 @@
+# ==========================================================================
+# UltraTrading360 backend stack
+#
+#   docker compose up --build
+#
+# Brings up Postgres, Redis, the API (ASGI, HTTP + WebSocket) and the bot
+# worker. The worker is a SEPARATE process from the API: a bot must outlive
+# the request that started it, which is exactly what a serverless platform
+# cannot provide.
+#
+# Nothing here is deployed by the frontend pipeline; this stack is intended
+# for a VPS, container host or managed Postgres+Redis of your choosing.
+# ==========================================================================
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ultratrading}
+      POSTGRES_USER: ${POSTGRES_USER:-ultratrading}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ultratrading} -d ${POSTGRES_DB:-ultratrading}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Bound to the compose network only. Expose a port here just for local debugging.
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DJANGO_DB_ENGINE: postgres
+      POSTGRES_HOST: db
+      REDIS_URL: redis://redis:6379/0
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             daphne -b 0.0.0.0 -p 8000 config.asgi:application"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  worker:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DJANGO_DB_ENGINE: postgres
+      POSTGRES_HOST: db
+      REDIS_URL: redis://redis:6379/0
+    # The engine worker. Scale horizontally with `docker compose up --scale worker=3`;
+    # bot leases and the unique-running constraint prevent two workers running one bot.
+    command: python manage.py run_engine
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    stop_grace_period: 30s
+
+volumes:
+  pgdata:
+  redisdata:

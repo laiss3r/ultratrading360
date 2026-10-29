@@ -1,0 +1,43 @@
+# --- dependencies / build output ---
+node_modules/
+.next/
+out/
+build/
+dist/
+.vercel/
+*.tsbuildinfo
+next-env.d.ts
+
+# --- python ---
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+backend/db.sqlite3
+backend/staticfiles/
+
+# --- secrets: never commit these ---
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+backend/.env
+
+# --- logs / os ---
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# --- test / coverage ---
+coverage/
+.nyc_output/
+
+# --- editors ---
+.idea/
+.vscode/
+*.swp

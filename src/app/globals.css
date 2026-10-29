@@ -1,0 +1,160 @@
+@import "tailwindcss";
+
+/* ------------------------------------------------------------------ *
+ * UltraTrading360 design tokens
+ * A dark, dense, desktop-first trading surface. Numerals are tabular so
+ * prices and digits do not jitter as they update.
+ * ------------------------------------------------------------------ */
+
+@theme {
+  --color-base: #07080b;
+  --color-surface: #0e1116;
+  --color-elevated: #141922;
+  --color-hover: #1a2029;
+  --color-line: #1f2733;
+  --color-line-strong: #2c3644;
+
+  --color-ink: #e8ecf3;
+  --color-ink-2: #a7b1c2;
+  --color-ink-3: #6c7789;
+  --color-ink-4: #4a5464;
+
+  --color-brand: #f0b90b;
+  --color-brand-dim: #7a5f06;
+  --color-accent: #22d3ee;
+
+  --color-profit: #16c784;
+  --color-profit-dim: #0d3d2c;
+  --color-loss: #ea3943;
+  --color-loss-dim: #43131a;
+  --color-warn: #f5a524;
+  --color-warn-dim: #42300c;
+  --color-info: #3b82f6;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  --radius-card: 12px;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--color-base);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-feature-settings: "cv02", "cv03", "cv04";
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Tabular numerals everywhere — essential in a trading UI. */
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-base);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-line-strong);
+  border-radius: 6px;
+  border: 2px solid var(--color-base);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a4657;
+}
+
+@layer utilities {
+  .card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-card);
+  }
+  .card-pad {
+    padding: 16px;
+  }
+  .grid-noise {
+    background-image:
+      linear-gradient(to right, rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+    background-size: 44px 44px;
+  }
+  .text-profit { color: var(--color-profit); }
+  .text-loss { color: var(--color-loss); }
+  .text-warn { color: var(--color-warn); }
+  .text-muted { color: var(--color-ink-3); }
+  .text-soft { color: var(--color-ink-2); }
+
+  .pulse-live::before {
+    content: "";
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: var(--color-profit);
+    margin-right: 7px;
+    box-shadow: 0 0 0 0 rgba(22, 199, 132, 0.7);
+    animation: pulse-ring 1.8s ease-out infinite;
+  }
+
+  @keyframes pulse-ring {
+    0% { box-shadow: 0 0 0 0 rgba(22, 199, 132, 0.55); }
+    70% { box-shadow: 0 0 0 7px rgba(22, 199, 132, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(22, 199, 132, 0); }
+  }
+
+  @keyframes flash-up {
+    0% { background-color: rgba(22, 199, 132, 0.22); }
+    100% { background-color: transparent; }
+  }
+  @keyframes flash-down {
+    0% { background-color: rgba(234, 57, 67, 0.22); }
+    100% { background-color: transparent; }
+  }
+  .flash-up { animation: flash-up 420ms ease-out; }
+  .flash-down { animation: flash-down 420ms ease-out; }
+}
+
+/* Native form controls restyled for the dark surface. */
+input[type="number"],
+input[type="text"],
+input[type="password"],
+select,
+textarea {
+  background: var(--color-base);
+  border: 1px solid var(--color-line);
+  color: var(--color-ink);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 13px;
+  outline: none;
+  width: 100%;
+}
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--color-line-strong);
+  box-shadow: 0 0 0 3px rgba(240, 185, 11, 0.12);
+}
+input[type="range"] {
+  accent-color: var(--color-brand);
+}
+input[type="checkbox"] {
+  accent-color: var(--color-brand);
+}
+select option {
+  background: var(--color-elevated);
+}
