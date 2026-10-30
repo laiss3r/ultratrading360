@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import type { ReactNode } from 'react';
+import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { cn } from '@/lib/cn';
 
 /* ------------------------------------------------------------------ Card */
@@ -50,6 +50,21 @@ const VARIANT: Record<Variant, string> = {
   subtle: 'bg-elevated text-ink-2 hover:bg-hover hover:text-ink',
 };
 
+/**
+ * Native `<button>` attributes are accepted and forwarded.
+ *
+ * This matters more than it looks. TypeScript does NOT type-check JSX attributes that contain a
+ * hyphen, because they cannot be valid identifiers — so `aria-label="Stop bot"` on a component
+ * whose props are a closed literal type compiles cleanly, passes lint, and is then silently thrown
+ * away at runtime. An icon-only control loses its accessible name and nothing anywhere complains.
+ * Extending ButtonHTMLAttributes makes those props real and forwards them to the DOM.
+ */
+type ButtonProps = {
+  variant?: Variant;
+  size?: 'sm' | 'md' | 'lg';
+  type?: 'button' | 'submit';
+} & Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'type'>;
+
 export function Button({
   children,
   onClick,
@@ -59,18 +74,11 @@ export function Button({
   className,
   title,
   type = 'button',
-}: {
-  children: ReactNode;
-  onClick?: () => void;
-  variant?: Variant;
-  size?: 'sm' | 'md' | 'lg';
-  disabled?: boolean;
-  className?: string;
-  title?: string;
-  type?: 'button' | 'submit';
-}) {
+  ...rest
+}: ButtonProps) {
   return (
     <button
+      {...rest}
       type={type}
       title={title}
       onClick={onClick}
