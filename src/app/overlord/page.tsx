@@ -381,13 +381,39 @@ export default function OverlordPage() {
                 <Button variant="success" size="lg" className="flex-1" disabled={running || !previewValidation.valid} onClick={() => void launch()}>
                   <Play className="h-4 w-4" /> Launch
                 </Button>
-                <Button variant="outline" size="lg" disabled={s.botState !== 'running'} onClick={() => s.pauseBot()}>
+                {/*
+                  Icon-only controls, so each carries an accessible name. Without aria-label a
+                  screen reader announces nothing at all, and these three include the button that
+                  halts a running bot — the one control that must never be ambiguous.
+                */}
+                <Button
+                  variant="outline"
+                  size="lg"
+                  aria-label="Pause bot"
+                  title="Pause — no new contracts are opened; in-flight contracts still settle"
+                  disabled={s.botState !== 'running'}
+                  onClick={() => s.pauseBot()}
+                >
                   <Pause className="h-4 w-4" />
                 </Button>
-                <Button variant="outline" size="lg" disabled={s.botState !== 'paused'} onClick={() => s.resumeBot()}>
+                <Button
+                  variant="outline"
+                  size="lg"
+                  aria-label="Resume bot"
+                  title="Resume"
+                  disabled={s.botState !== 'paused'}
+                  onClick={() => s.resumeBot()}
+                >
                   <Play className="h-4 w-4" />
                 </Button>
-                <Button variant="danger" size="lg" disabled={s.botState === 'idle' || s.botState === 'stopped'} onClick={() => s.stopBot('stopped from Overlord')}>
+                <Button
+                  variant="danger"
+                  size="lg"
+                  aria-label="Stop bot"
+                  title="Stop — halts immediately; any in-flight contract is allowed to settle"
+                  disabled={s.botState === 'idle' || s.botState === 'stopped'}
+                  onClick={() => s.stopBot('stopped from Overlord')}
+                >
                   <Square className="h-4 w-4" />
                 </Button>
               </div>
