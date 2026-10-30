@@ -150,6 +150,38 @@ export const SYNTHETIC_PRESETS: Record<string, SyntheticMarketConfig> = {
   '1HZ100V': { symbol: '1HZ100V', startPrice: 1170, pipSize: 2, volatilityPct: 100, tickIntervalSeconds: 1 },
 };
 
+/** Deriv's own display names for these instruments, so the labels are not invented. */
+export const SYNTHETIC_DISPLAY_NAMES: Record<string, string> = {
+  R_10: 'Volatility 10 Index',
+  R_25: 'Volatility 25 Index',
+  R_50: 'Volatility 50 Index',
+  R_75: 'Volatility 75 Index',
+  R_100: 'Volatility 100 Index',
+  '1HZ10V': 'Volatility 10 (1s) Index',
+  '1HZ25V': 'Volatility 25 (1s) Index',
+  '1HZ50V': 'Volatility 50 (1s) Index',
+  '1HZ75V': 'Volatility 75 (1s) Index',
+  '1HZ100V': 'Volatility 100 (1s) Index',
+};
+
+/**
+ * The instruments the simulator can actually produce, with the precision each one
+ * uses for digit extraction.
+ *
+ * The simulator has no market list of its own — Deriv's `active_symbols` needs no
+ * credentials, but the offline feed deliberately makes no network calls at all. So
+ * when nothing live is connected, the UI offers exactly this catalogue and nothing
+ * more: offering a symbol the simulator cannot price would be a lie about what a
+ * strategy trades.
+ */
+export const SIMULATOR_CATALOGUE = Object.keys(SYNTHETIC_PRESETS).map((symbol) => ({
+  symbol,
+  name: SYNTHETIC_DISPLAY_NAMES[symbol] ?? symbol,
+  pipSize: SYNTHETIC_PRESETS[symbol].pipSize,
+  cadence: (SYNTHETIC_PRESETS[symbol].tickIntervalSeconds ?? 2) <= 1 ? ('fast' as const) : ('normal' as const),
+  open: true,
+}));
+
 export function presetFor(symbol: string): SyntheticMarketConfig {
   return (
     SYNTHETIC_PRESETS[symbol] ?? {

@@ -166,10 +166,10 @@ export default function OverlordPage() {
     <div className="mx-auto max-w-[1600px] space-y-3 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
-            <Zap className="h-4 w-4 text-brand" /> Overlord Pro · quick launch
+          <h2 className="flex items-center gap-2 text-sm font-bold text-prominent">
+            <Zap className="h-4 w-4 text-coral" /> Overlord Pro · quick launch
           </h2>
-          <p className="text-[11px] text-ink-3">
+          <p className="text-xxs text-less-prominent">
             Configure a contract in seconds. Session targets and caps are written into the enforced risk limits before launch, so the bot is
             stopped by the risk manager and not by a UI timer.
           </p>
@@ -193,12 +193,12 @@ export default function OverlordPage() {
                       key={c.value}
                       type="button"
                       onClick={() => set({ contractType: c.value })}
-                      className={`rounded-lg border px-2.5 py-2 text-left transition-colors ${
-                        cfg.contractType === c.value ? 'border-brand/50 bg-brand/10' : 'border-line bg-base/40 hover:border-line-strong'
+                      className={`rounded border px-2.5 py-2 text-left transition-colors ${
+                        cfg.contractType === c.value ? 'border-brand/50 bg-coral/10' : 'border-line bg-section-1 hover:border-line'
                       }`}
                     >
-                      <div className={`text-[11.5px] font-semibold ${cfg.contractType === c.value ? 'text-brand' : 'text-ink'}`}>{c.label}</div>
-                      <div className="num mt-0.5 text-[9.5px] text-ink-4">{c.value}</div>
+                      <div className={`text-xs font-bold ${cfg.contractType === c.value ? 'text-coral' : 'text-prominent'}`}>{c.label}</div>
+                      <div className="num mt-0.5 text-xxs text-less-prominent">{c.value}</div>
                     </button>
                   ))}
                 </div>
@@ -327,10 +327,10 @@ export default function OverlordPage() {
                       <Field label="Resulting stake ladder (after clamping)">
                         <div className="flex flex-wrap items-center gap-1.5">
                           {ladder.map((v, i) => (
-                            <span key={i} className="num rounded border border-line bg-base/50 px-1.5 py-0.5 text-[11px] text-ink-2">
-                              {i > 0 && <span className="text-ink-4">→ </span>}
+                            <span key={i} className="num rounded border border-line bg-section-2/50 px-1.5 py-0.5 text-xxs text-general">
+                              {i > 0 && <span className="text-less-prominent">→ </span>}
                               {v.toFixed(2)}
-                              {v >= effective.stakeCap - 1e-9 && <span className="ml-1 text-[9px] text-warn">CAP</span>}
+                              {v >= effective.stakeCap - 1e-9 && <span className="ml-1 text-xxs text-orange">CAP</span>}
                             </span>
                           ))}
                         </div>
@@ -357,7 +357,7 @@ export default function OverlordPage() {
             right={<Badge tone={running ? 'profit' : s.botState === 'halted' ? 'warn' : 'neutral'}>{s.botState.toUpperCase()}</Badge>}
           >
             <div className="space-y-2.5">
-              <div className="grid grid-cols-2 gap-2 text-[11px]">
+              <div className="grid grid-cols-2 gap-2 text-xxs">
                 <KV label="Effective stake cap" value={money(effective.maxStake, '')} />
                 <KV label="Stop loss" value={money(effective.stopLoss, '')} />
                 <KV label="Target profit" value={money(effective.targetProfit, '')} />
@@ -431,7 +431,7 @@ export default function OverlordPage() {
                 <Banner tone="warn">{MODE_LABEL[s.settings.mode]} requires a connected Deriv account. Market data still streams.</Banner>
               )}
 
-              {s.botDetail && <div className="num rounded border border-line bg-base/40 px-2.5 py-1.5 text-[10.5px] text-ink-3">{s.botDetail}</div>}
+              {s.botDetail && <div className="num rounded border border-line bg-section-1 px-2.5 py-1.5 text-xxs text-less-prominent">{s.botDetail}</div>}
             </div>
           </Card>
 
@@ -468,30 +468,30 @@ export default function OverlordPage() {
         pad={false}
       >
         {showMethod && (
-          <div className="border-b border-line bg-base/40 px-4 py-3">
-            <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-ink">
-              <Radar className="h-3.5 w-3.5 text-accent" /> How this ranking is computed
+          <div className="border-b border-line bg-section-1 px-4 py-3">
+            <div className="mb-1.5 flex items-center gap-1.5 text-xxs font-bold text-prominent">
+              <Radar className="h-3.5 w-3.5 text-blue" /> How this ranking is computed
             </div>
-            <ul className="space-y-1 text-[11px] leading-relaxed text-ink-2">
+            <ul className="space-y-1 text-xxs leading-relaxed text-general">
               <li>
-                <strong className="text-ink">Sample.</strong> For each open market we pull the last 300 ticks and extract the final digit using
+                <strong className="text-prominent">Sample.</strong> For each open market we pull the last 300 ticks and extract the final digit using
                 that instrument’s own <code className="num">pip_size</code>. Markets we cannot reach are skipped rather than scored zero.
               </li>
               <li>
-                <strong className="text-ink">Digit entropy (weight 0.6).</strong> Shannon entropy of the observed last-digit distribution,
+                <strong className="text-prominent">Digit entropy (weight 0.6).</strong> Shannon entropy of the observed last-digit distribution,
                 normalised to 0–1 where 1.0 is perfectly uniform. Near 1.0 means the sample looks like a fair 1-in-10 draw.
               </li>
               <li>
-                <strong className="text-ink">Realised movement (weight 0.3).</strong> Mean absolute per-tick change expressed in pips — a
+                <strong className="text-prominent">Realised movement (weight 0.3).</strong> Mean absolute per-tick change expressed in pips — a
                 volatility proxy, capped at 1.0 contribution so an outlier cannot dominate.
               </li>
               <li>
-                <strong className="text-ink">Cadence (weight 0.05–0.1).</strong> Whether the instrument is a 1-second index (faster tick
+                <strong className="text-prominent">Cadence (weight 0.05–0.1).</strong> Whether the instrument is a 1-second index (faster tick
                 arrival) or a standard volatility index.
               </li>
             </ul>
             <Banner tone="warn" className="mt-2">
-              <strong className="font-semibold">What this ranking is NOT.</strong> A high score means the recent sample looked uniform and
+              <strong className="font-bold">What this ranking is NOT.</strong> A high score means the recent sample looked uniform and
               liquid. It does <strong>not</strong> mean the next digit is predictable, and no ordering here implies future profit. Observed
               regularity in a finite sample is not evidence of predictive power — use Signal Lab for goodness-of-fit, dependence and
               out-of-sample tests before believing any edge exists.
@@ -510,8 +510,8 @@ export default function OverlordPage() {
           </Empty>
         ) : (
           <div className="max-h-[420px] overflow-auto">
-            <table className="w-full text-left text-[11px]">
-              <thead className="sticky top-0 z-10 bg-elevated text-[9.5px] tracking-wider text-ink-3 uppercase">
+            <table className="w-full text-left text-xxs">
+              <thead className="sticky top-0 z-10 bg-section-1 text-xxs tracking-wider text-less-prominent uppercase">
                 <tr>
                   <th className="px-3 py-2">#</th>
                   <th className="px-3 py-2">Market</th>
@@ -525,26 +525,26 @@ export default function OverlordPage() {
               </thead>
               <tbody>
                 {s.rankings.map((r, i) => (
-                  <tr key={r.symbol} className={`border-t border-line/60 hover:bg-hover/40 ${cfg.market === r.symbol ? 'bg-brand/6' : ''}`}>
-                    <td className="num px-3 py-1.5 text-ink-4">{i + 1}</td>
+                  <tr key={r.symbol} className={`border-t border-line/60 hover:bg-state-hover/40 ${cfg.market === r.symbol ? 'bg-coral/6' : ''}`}>
+                    <td className="num px-3 py-1.5 text-less-prominent">{i + 1}</td>
                     <td className="px-3 py-1.5">
-                      <div className="text-ink">{r.name}</div>
-                      <div className="num text-[9.5px] text-ink-4">{r.symbol}</div>
+                      <div className="text-prominent">{r.name}</div>
+                      <div className="num text-xxs text-less-prominent">{r.symbol}</div>
                     </td>
-                    <td className="num px-3 py-1.5 text-right text-ink-2">{r.sample}</td>
+                    <td className="num px-3 py-1.5 text-right text-general">{r.sample}</td>
                     <td className="px-3 py-1.5 text-right">
-                      <span className={`num font-semibold ${r.digitEntropy >= 0.97 ? 'text-profit' : r.digitEntropy >= 0.9 ? 'text-warn' : 'text-loss'}`}>
+                      <span className={`num font-bold ${r.digitEntropy >= 0.97 ? 'text-profit' : r.digitEntropy >= 0.9 ? 'text-orange' : 'text-loss'}`}>
                         {r.digitEntropy.toFixed(4)}
                       </span>
                       <div className="mt-0.5 h-[3px] w-full overflow-hidden rounded bg-line">
                         <div className="h-full rounded bg-accent/70" style={{ width: `${r.digitEntropy * 100}%` }} />
                       </div>
                     </td>
-                    <td className="num px-3 py-1.5 text-right text-ink-2">{r.meanAbsMovePips.toFixed(2)}</td>
+                    <td className="num px-3 py-1.5 text-right text-general">{r.meanAbsMovePips.toFixed(2)}</td>
                     <td className="px-3 py-1.5">
                       <Badge tone={r.cadence === 'fast' ? 'info' : 'neutral'}>{r.cadence}</Badge>
                     </td>
-                    <td className="num px-3 py-1.5 text-right font-semibold text-brand">{r.score.toFixed(3)}</td>
+                    <td className="num px-3 py-1.5 text-right font-bold text-coral">{r.score.toFixed(3)}</td>
                     <td className="px-3 py-1.5 text-right">
                       <Button size="sm" variant="ghost" onClick={() => { set({ market: r.symbol }); void s.selectSymbol(r.symbol); }}>
                         Select
@@ -554,7 +554,7 @@ export default function OverlordPage() {
                 ))}
               </tbody>
             </table>
-            <div className="border-t border-line px-3 py-2 text-[10px] text-ink-4">
+            <div className="border-t border-line px-3 py-2 text-xxs text-less-prominent">
               {s.rankings.length} markets sampled · {s.rankings.reduce((a, r) => a + r.sample, 0)} ticks collected. Entropy 1.0000 = perfectly
               uniform in this sample.
             </div>
@@ -582,9 +582,9 @@ export default function OverlordPage() {
 
 function KV({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded border border-line bg-base/40 px-2.5 py-1.5">
-      <div className="text-[9.5px] tracking-wider text-ink-4 uppercase">{label}</div>
-      <div className="num mt-0.5 text-[12px] font-semibold text-ink">{value}</div>
+    <div className="rounded border border-line bg-section-1 px-2.5 py-1.5">
+      <div className="text-xxs tracking-wider text-less-prominent uppercase">{label}</div>
+      <div className="num mt-0.5 text-xs font-bold text-prominent">{value}</div>
     </div>
   );
 }

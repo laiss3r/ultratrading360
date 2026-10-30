@@ -503,3 +503,124 @@ async function flush(times = 6) {
   for (let i = 0; i < times; i++) await Promise.resolve();
   await new Promise((r) => setTimeout(r, 0));
 }
+
+describe('stake progressions', () => {
+  const openLimits = () => ({
+    ...DEFAULT_RISK_LIMITS,
+    tradingEnabled: true,
+    maxStake: 1000,
+    maxSessionLoss: 1e9,
+    maxDailyLoss: 1e9,
+  });
+
+  const stakesOf = (bot: TradingBot): number[] => bot.getTrades().map((t) => t.stake);
+
+  it('martingale escalates the stake after each consecutive loss', async () => {
+    const provider = new ScriptedProvider();
+    provider.settleAs = 'loss';
+    const bot = new TradingBot(
+      alwaysStrategy({ stake: 1, progression: { kind: 'martingale', unit: 1, multiplier: 2 } }),
+      provider,
+      new RiskManager(openLimits(), { ...DEFAULT_RECOVERY }),
+      {},
+    );
+    await bot.start(20);
+    for (let i = 0; i < 4; i++) {
+      provider.push('R_100', 7);
+      await flush();
+    }
+    expect(stakesOf(bot)).toEqual([1, 2, 4, 8]);
+  });
+
+  it('martingale resets the stake on a win', async () => {
+    const provider = new ScriptedProvider();
+    provider.settleAs = 'alternate'; // win, loss, win, loss …
+    const bot = new TradingBot(
+      alwaysStrategy({ stake: 1, progression: { kind: 'martingale', unit: 1, multiplier: 2 } }),
+      provider,
+      new RiskManager(openLimits(), { ...DEFAULT_RECOVERY }),
+      {},
+    );
+    await bot.start(20);
+    for (let i = 0; i < 4; i++) {
+      provider.push('R_100', 7);
+      await flush();
+    }
+    // win at 1, loss at 1, win at 2 (one trailing loss), loss at 1 (reset).
+    expect(stakesOf(bot)).toEqual([1, 1, 2, 1]);
+  });
+
+  it("d'alembert climbs one unit per loss, never doubling", async () => {
+    const provider = new ScriptedProvider();
+    provider.settleAs = 'loss';
+    const bot = new TradingBot(
+      alwaysStrategy({ stake: 1, progression: { kind: 'dalembert', unit: 1 } }),
+      provider,
+      new RiskManager(openLimits(), { ...DEFAULT_RECOVERY }),
+      {},
+    );
+    await bot.start(20);
+    for (let i = 0; i < 4; i++) {
+      provider.push('R_100', 7);
+      await flush();
+    }
+    expect(stakesOf(bot)).toEqual([1, 2, 3, 4]);
+  });
+
+  it('the risk manager caps a progression at maxStake', async () => {
+    const provider = new ScriptedProvider();
+    provider.settleAs = 'loss';
+    const bot = new TradingBot(
+      alwaysStrategy({ stake: 1, progression: { kind: 'martingale', unit: 1, multiplier: 2 } }),
+      provider,
+      new RiskManager({ ...openLimits(), maxStake: 5 }, { ...DEFAULT_RECOVERY }),
+      {},
+    );
+    await bot.start(20);
+    for (let i = 0; i < 4; i++) {
+      provider.push('R_100', 7);
+      await flush();
+    }
+    // 8 would be next, but the user's own cap of 5 is the ceiling.
+    expect(stakesOf(bot)).toEqual([1, 2, 4, 5]);
+  });
+
+  it('a configured progression replaces the legacy recovery rather than compounding with it', async () => {
+    const provider = new ScriptedProvider();
+    provider.settleAs = 'loss';
+    const bot = new TradingBot(
+      alwaysStrategy({
+        stake: 1,
+        progression: { kind: 'martingale', unit: 1, multiplier: 2 },
+        recovery: { enabled: true, multiplier: 3, stepLimit: 5, maxStake: 500, maxDrawdown: 1e9 },
+      }),
+      provider,
+      new RiskManager(openLimits(), { enabled: true, multiplier: 3, stepLimit: 5, maxStake: 500, maxDrawdown: 1e9 }),
+      {},
+    );
+    await bot.start(20);
+    for (let i = 0; i < 3; i++) {
+      provider.push('R_100', 7);
+      await flush();
+    }
+    // Doubling (2,4), not 2*3 or 3^step: one escalation, never two.
+    expect(stakesOf(bot)).toEqual([1, 2, 4]);
+  });
+
+  it('without a progression the stake stays at the strategy stake', async () => {
+    const provider = new ScriptedProvider();
+    provider.settleAs = 'loss';
+    const bot = new TradingBot(
+      alwaysStrategy({ stake: 1, recovery: { ...DEFAULT_RECOVERY, enabled: false } }),
+      provider,
+      new RiskManager(openLimits(), { ...DEFAULT_RECOVERY, enabled: false }),
+      {},
+    );
+    await bot.start(20);
+    for (let i = 0; i < 3; i++) {
+      provider.push('R_100', 7);
+      await flush();
+    }
+    expect(stakesOf(bot)).toEqual([1, 1, 1]);
+  });
+});

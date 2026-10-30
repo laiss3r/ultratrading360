@@ -24,6 +24,16 @@ const nextConfig: NextConfig = {
   cacheComponents: false,
   partialPrefetching: false,
   reactStrictMode: true,
+  /**
+   * Dev-only. Next 16 treats a request whose origin differs from the dev server's
+   * advertised host as cross-origin and blocks its dev resources (the HMR socket and
+   * the client bootstrap) — which makes the page render server HTML and never hydrate,
+   * with no error anywhere but the server log. Automating the UI against
+   * http://127.0.0.1:3000 while the server advertises localhost hits exactly that.
+   * Listing the loopback forms here keeps local verification possible. It has no
+   * effect on a production build.
+   */
+  allowedDevOrigins: ['127.0.0.1', 'localhost'],
   turbopack: {
     rules: {
       '*.css': {

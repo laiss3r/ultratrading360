@@ -58,7 +58,7 @@ export default function RiskPage() {
 
       {snap.halted && (
         <Banner tone="danger">
-          <strong className="font-semibold">Session halted:</strong> {snap.haltReason ?? 'a limit was breached'}. Trading is blocked until you
+          <strong className="font-bold">Session halted:</strong> {snap.haltReason ?? 'a limit was breached'}. Trading is blocked until you
           reset the session counters.
         </Banner>
       )}
@@ -178,7 +178,7 @@ export default function RiskPage() {
             </div>
 
             <Banner tone="warn">
-              <strong className="font-semibold">Read this before enabling recovery.</strong> A martingale does not change the expected value of
+              <strong className="font-bold">Read this before enabling recovery.</strong> A martingale does not change the expected value of
               a negative-EV contract; it changes the <em>distribution</em> of outcomes, trading many small wins for occasional large losses.
               With a multiplier of {R.multiplier} and a step limit of {R.stepLimit}, the worst-case stake sequence from{' '}
               {s.settings.simulationStartingBalance > 0 ? money(L.minStake, '') : 'the minimum stake'} peaks at{' '}
@@ -193,9 +193,9 @@ export default function RiskPage() {
 
         <Card title="Session" subtitle="Reset counters or clear history.">
           <div className="space-y-2.5">
-            <div className="rounded-lg border border-line bg-base/40 px-3 py-2">
-              <div className="text-[10px] tracking-wider text-ink-3 uppercase">Recovery step</div>
-              <div className="num text-sm font-semibold text-ink">{snap.recoveryStep} / {R.stepLimit}</div>
+            <div className="rounded border border-line bg-section-1 px-3 py-2">
+              <div className="text-xxs tracking-wider text-less-prominent uppercase">Recovery step</div>
+              <div className="num text-sm font-bold text-prominent">{snap.recoveryStep} / {R.stepLimit}</div>
             </div>
             <Button variant="outline" className="w-full" onClick={() => s.resetRisk()}>
               <RotateCcw className="h-3.5 w-3.5" /> Reset session counters

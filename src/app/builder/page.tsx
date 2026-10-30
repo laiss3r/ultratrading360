@@ -1,23 +1,23 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { Copy, Pause, Play, Plus, Save, Square, Trash2, Zap } from 'lucide-react';
-import { Badge, Banner, Button, Card, Empty, Field } from '@/components/ui';
-import { ConditionTree } from '@/components/ConditionTree';
-import { DigitStrip, TickChart } from '@/components/charts';
+import { useMemo, useRef, useState } from 'react';
+import { Check, ChevronDown, ChevronRight, Copy, Download, Redo2, RotateCcw, Save, Upload, Zap } from 'lucide-react';
+import { Badge, Banner, Button } from '@/components/ui';
+import { CATEGORY_META, ConditionTree, KINDS, addChild, defaultsFor, emptyGroup } from '@/components/ConditionTree';
 import { useApp } from '@/state/store';
 import { createStrategy, newStrategyId, validateStrategy, type Strategy } from '@/lib/engine/strategies';
-import { evaluateGroup, type ConditionGroup } from '@/lib/engine/conditions';
+import { evaluateGroup, type ConditionGroup, type ConditionKind } from '@/lib/engine/conditions';
 import type { ContractType } from '@/lib/deriv/contracts';
-import { ago, MODE_LABEL, money, signed } from '@/lib/format';
+import { PROGRESSIONS, PROGRESSION_ORDER, worstCaseStake } from '@/lib/engine/progressions';
+import { SIMULATOR_CATALOGUE } from '@/lib/engine/rng';
 
-const DIGIT_CONTRACTS: { value: ContractType; label: string; barrier: 'none' | 'required' | 'optional' }[] = [
-  { value: 'DIGITODD', label: 'Digit Odd', barrier: 'none' },
-  { value: 'DIGITEVEN', label: 'Digit Even', barrier: 'none' },
-  { value: 'DIGITOVER', label: 'Digit Over', barrier: 'required' },
-  { value: 'DIGITUNDER', label: 'Digit Under', barrier: 'required' },
-  { value: 'DIGITMATCH', label: 'Digit Matches', barrier: 'required' },
-  { value: 'DIGITDIFF', label: 'Digit Differs', barrier: 'required' },
+const DIGIT_CONTRACTS: { value: ContractType; label: string; barrier: 'none' | 'required' }[] = [
+  { value: 'DIGITODD', label: 'Odd', barrier: 'none' },
+  { value: 'DIGITEVEN', label: 'Even', barrier: 'none' },
+  { value: 'DIGITOVER', label: 'Over', barrier: 'required' },
+  { value: 'DIGITUNDER', label: 'Under', barrier: 'required' },
+  { value: 'DIGITMATCH', label: 'Matches', barrier: 'required' },
+  { value: 'DIGITDIFF', label: 'Differs', barrier: 'required' },
 ];
 
 const DURATIONS = [
@@ -28,11 +28,38 @@ const DURATIONS = [
   { value: 'd', label: 'days' },
 ] as const;
 
+const BLOCK_COLOUR = {
+  root: 'var(--color-block-root)',
+  purchase: 'var(--color-block-purchase)',
+  sell: 'var(--color-block-sell)',
+  restart: 'var(--color-block-restart)',
+} as const;
+
+/**
+ * Bot Builder.
+ *
+ * Laid out the way Deriv Bot lays it out: a toolbar across the top, a block
+ * toolbox on the left, and the strategy itself in the centre as four stacked
+ * root blocks — Trade parameters, Purchase conditions, Sell conditions and
+ * Restart trading conditions. Those four sections are Deriv Bot's own root
+ * blocks, so a trader who has used DBot reads this immediately.
+ *
+ * The condition tree stays plain JSON underneath, which keeps it serialisable,
+ * versionable and identical to the object the engine evaluates.
+ */
 export default function BuilderPage() {
   const s = useApp();
   const [draft, setDraft] = useState<Strategy | null>(null);
   const [dirty, setDirty] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  // Undo/redo over the whole draft. Deriv Bot's toolbar offers both, and a
+  // builder that can destroy an unsaved condition tree with one misclick is not
+  // a builder anyone will trust. Declared above the render-time sync below,
+  // which clears both when the selection changes.
+  const [past, setPast] = useState<Strategy[]>([]);
+  const [future, setFuture] = useState<Strategy[]>([]);
 
   const selected = s.strategies.find((x) => x.id === s.activeStrategyId) ?? s.strategies[0] ?? null;
   const selectedId = selected?.id ?? null;
@@ -51,11 +78,11 @@ export default function BuilderPage() {
     setLoadedId(selectedId);
     setDraft(selected ? structuredClone(selected) : null);
     setDirty(false);
+    setPast([]);
+    setFuture([]);
   }
 
-  // First run: nothing saved yet, so offer a starter rather than an empty screen. Also derived
-  // during render so the empty state never flashes. Once per mount is enough — the "New strategy"
-  // button covers the case where the user later deletes everything.
+  // First run: nothing saved yet, so offer a starter rather than an empty screen.
   const [starterOffered, setStarterOffered] = useState(false);
   if (s.hydrated && !starterOffered && s.strategies.length === 0 && !draft) {
     setStarterOffered(true);
@@ -74,9 +101,29 @@ export default function BuilderPage() {
 
   const patch = (p: Partial<Strategy>) => {
     if (!draft) return;
+    setPast((h) => [...h.slice(-49), draft]);
+    setFuture([]);
     setDraft({ ...draft, ...p });
     setDirty(true);
     setMsg(null);
+  };
+
+  const undo = () => {
+    if (!draft || past.length === 0) return;
+    const prev = past[past.length - 1];
+    setPast((h) => h.slice(0, -1));
+    setFuture((f) => [draft, ...f].slice(0, 50));
+    setDraft(prev);
+    setDirty(true);
+  };
+
+  const redo = () => {
+    if (!draft || future.length === 0) return;
+    const next = future[0];
+    setFuture((f) => f.slice(1));
+    setPast((h) => [...h, draft]);
+    setDraft(next);
+    setDirty(true);
   };
 
   async function save() {
@@ -91,7 +138,14 @@ export default function BuilderPage() {
 
   async function saveAsNew() {
     if (!draft) return;
-    const copy: Strategy = { ...structuredClone(draft), id: newStrategyId(), name: `${draft.name} (copy)`, version: 1, createdAt: Date.now(), updatedAt: Date.now() };
+    const copy: Strategy = {
+      ...structuredClone(draft),
+      id: newStrategyId(),
+      name: `${draft.name} (copy)`,
+      version: 1,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
     const r = await s.saveStrategy(copy);
     setMsg({ ok: r.ok, text: r.message });
     if (r.ok) {
@@ -101,321 +155,568 @@ export default function BuilderPage() {
     }
   }
 
+  function exportJson() {
+    if (!draft) return;
+    const blob = new Blob([JSON.stringify(draft, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${draft.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'strategy'}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function importJson(file: File) {
+    try {
+      const parsed = JSON.parse(await file.text()) as Partial<Strategy>;
+      const imported = createStrategy({ ...parsed, id: newStrategyId(), version: 1, updatedAt: Date.now() });
+      const v = validateStrategy(imported);
+      setDraft(imported);
+      setDirty(true);
+      setMsg(
+        v.valid
+          ? { ok: true, text: `Imported "${imported.name}". Check the blocks, then save.` }
+          : { ok: false, text: `Imported with problems: ${v.errors.join(' · ')}` },
+      );
+    } catch (e) {
+      setMsg({ ok: false, text: `Could not read that file: ${(e as Error).message}` });
+    }
+  }
+
   const contractMeta = DIGIT_CONTRACTS.find((c) => c.value === draft?.contractType);
+  const progression = draft?.progression ?? { kind: 'flat' as const, unit: draft?.stake ?? 0.35, multiplier: 2 };
+  const progInfo = PROGRESSIONS[progression.kind];
 
   return (
-    <div className="mx-auto max-w-[1600px] space-y-3 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h2 className="text-sm font-semibold text-ink">Bot Builder · Elite Prime</h2>
-          <p className="text-[11px] text-ink-3">
-            Compose a versioned strategy from an AND/OR condition tree. Nothing executes until you press Run, and nothing executes at all in
-            a mode you have not enabled in <span className="text-ink-2">Risk</span>.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {dirty && <Badge tone="warn">UNSAVED</Badge>}
-          <Button variant="outline" size="sm" onClick={() => patch({ ...createStrategy({ id: draft?.id, name: 'New strategy' }), id: draft?.id ?? newStrategyId() } as Partial<Strategy>)}>
-            <Plus className="h-3 w-3" /> Reset fields
-          </Button>
-          <Button variant="outline" size="sm" disabled={!draft} onClick={() => void saveAsNew()}>
-            <Copy className="h-3 w-3" /> Save as new
-          </Button>
-          <Button variant="primary" size="sm" disabled={!draft || !dirty || (validation ? !validation.valid : true)} onClick={() => void save()}>
-            <Save className="h-3 w-3" /> Save {draft ? `v${draft.version + 1}` : ''}
-          </Button>
-        </div>
-      </div>
+    <div className="flex h-full min-h-0 flex-col">
+      {/* ------------------------------------------------------- toolbar */}
+      <Toolbar
+        draft={draft}
+        dirty={dirty}
+        canUndo={past.length > 0}
+        canRedo={future.length > 0}
+        strategies={s.strategies}
+        activeId={s.activeStrategyId}
+        onPick={(id) => {
+          const st = s.strategies.find((x) => x.id === id);
+          if (!st) return;
+          if (dirty && !window.confirm('Discard unsaved changes to the current strategy?')) return;
+          s.setActiveStrategy(id);
+          setDraft(structuredClone(st));
+          setDirty(false);
+          setPast([]);
+          setFuture([]);
+          setMsg(null);
+        }}
+        onNew={() => {
+          if (dirty && !window.confirm('Discard unsaved changes?')) return;
+          const fresh = createStrategy({ id: newStrategyId(), name: 'New strategy', entry: emptyGroup() });
+          setDraft(fresh);
+          setDirty(true);
+          setPast([]);
+          setFuture([]);
+        }}
+        onUndo={undo}
+        onRedo={redo}
+        onExport={exportJson}
+        onImport={() => fileRef.current?.click()}
+        onSaveAsNew={() => void saveAsNew()}
+        onSave={() => void save()}
+        onQuick={s.openQuickStrategy}
+      />
+      <input
+        ref={fileRef}
+        type="file"
+        accept="application/json,.json"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) void importJson(f);
+          e.target.value = '';
+        }}
+      />
 
-      {msg && <Banner tone={msg.ok ? 'success' : 'danger'}>{msg.text}</Banner>}
+      {msg && (
+        <div className="px-3 pt-3">
+          <Banner tone={msg.ok ? 'success' : 'danger'}>{msg.text}</Banner>
+        </div>
+      )}
 
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[260px_minmax(0,1fr)]">
-        {/* ------------------------------------------------ saved strategies */}
-        <Card title="Strategies" subtitle="Stored in IndexedDB in this browser." pad={false}>
-          {s.strategies.length === 0 ? (
-            <Empty title="No saved strategies">Create one to get started.</Empty>
+      <div className="flex min-h-0 flex-1">
+        {/* ------------------------------------------------------ toolbox */}
+        <Toolbox
+          onAdd={(kind) => {
+            if (!draft) return;
+            patch({ entry: addChild(draft.entry, draft.entry.id, defaultsFor(kind)) });
+          }}
+          onAddGroup={() => {
+            if (!draft) return;
+            const g: ConditionGroup = {
+              id: `g${Date.now().toString(36)}`,
+              op: draft.entry.op === 'AND' ? 'OR' : 'AND',
+              children: [defaultsFor('even')],
+            };
+            patch({ entry: addChild(draft.entry, draft.entry.id, g) });
+          }}
+        />
+
+        {/* ---------------------------------------------------- workspace */}
+        <div className="dt-workspace">
+          {!draft ? (
+            <div className="mx-auto max-w-md rounded border border-dashed border-line bg-main-1 p-6 text-center">
+              <p className="text-sm font-bold text-prominent">No strategy open</p>
+              <p className="mt-1 text-xs text-less-prominent">
+                Pick a bot from the toolbar, create a new one, or launch a preset with Quick strategy.
+              </p>
+            </div>
           ) : (
-            <ul className="max-h-[640px] overflow-auto p-1.5">
-              {s.strategies.map((st) => {
-                const active = st.id === s.activeStrategyId;
-                const stTrades = s.trades.filter((t) => t.strategyId === st.id);
-                const stNet = stTrades.reduce((a, t) => a + t.profit, 0);
-                return (
-                  <li key={st.id}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (dirty && !window.confirm('Discard unsaved changes to the current strategy?')) return;
-                        s.setActiveStrategy(st.id);
-                        setDraft(structuredClone(st));
-                        setDirty(false);
-                        setMsg(null);
-                      }}
-                      className={`w-full rounded-lg border px-2.5 py-2 text-left transition-colors ${
-                        active ? 'border-brand/40 bg-brand/8' : 'border-transparent hover:border-line hover:bg-hover'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className={`truncate text-[11.5px] font-medium ${active ? 'text-brand' : 'text-ink'}`}>{st.name}</span>
-                        <span className="num shrink-0 text-[9.5px] text-ink-4">v{st.version}</span>
-                      </div>
-                      <div className="num mt-0.5 flex items-center gap-1.5 text-[9.5px] text-ink-4">
-                        <span>{st.market}</span>
-                        <span>·</span>
-                        <span>{st.contractType}</span>
-                        <span>·</span>
-                        <span>{st.stake}</span>
-                      </div>
-                      {stTrades.length > 0 && (
-                        <div className="num mt-0.5 text-[9.5px]">
-                          <span className={stNet >= 0 ? 'text-profit' : 'text-loss'}>{signed(stNet)}</span>
-                          <span className="text-ink-4"> over {stTrades.length} trades</span>
-                        </div>
-                      )}
-                      <div className="mt-1 flex items-center justify-between">
-                        <span className="text-[9px] text-ink-4">{ago(st.updatedAt)}</span>
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (!window.confirm(`Delete "${st.name}"? This cannot be undone.`)) return;
-                            void s.deleteStrategy(st.id);
-                          }}
-                          onKeyDown={(e) => e.key === 'Enter' && void s.deleteStrategy(st.id)}
-                          className="rounded p-0.5 text-ink-4 hover:bg-loss/12 hover:text-loss"
-                          title="Delete strategy"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </span>
-                      </div>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </Card>
+            <div className="mx-auto flex max-w-[820px] flex-col gap-2.5">
+              {validation && !validation.valid && (
+                <Banner tone="danger">
+                  <strong>Cannot save or run:</strong>
+                  <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                    {validation.errors.map((e) => (
+                      <li key={e}>{e}</li>
+                    ))}
+                  </ul>
+                </Banner>
+              )}
+              {validation && validation.valid && validation.warnings.length > 0 && (
+                <Banner tone="warn">
+                  <strong>Warnings (saving is still allowed):</strong>
+                  <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                    {validation.warnings.map((w) => (
+                      <li key={w}>{w}</li>
+                    ))}
+                  </ul>
+                </Banner>
+              )}
 
-        {/* ------------------------------------------------------- the editor */}
-        {!draft ? (
-          <Card title="Editor">
-            <Empty title="Select or create a strategy" />
-          </Card>
-        ) : (
-          <div className="min-w-0 space-y-3">
-            {validation && !validation.valid && (
-              <Banner tone="danger">
-                <strong className="font-semibold">Cannot save or run:</strong>
-                <ul className="mt-1 list-disc space-y-0.5 pl-4">
-                  {validation.errors.map((e) => <li key={e}>{e}</li>)}
-                </ul>
-              </Banner>
-            )}
-            {validation && validation.valid && validation.warnings.length > 0 && (
-              <Banner tone="warn">
-                <strong className="font-semibold">Warnings (saving is still allowed):</strong>
-                <ul className="mt-1 list-disc space-y-0.5 pl-4">
-                  {validation.warnings.map((w) => <li key={w}>{w}</li>)}
-                </ul>
-              </Banner>
-            )}
-
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              <Card title="Instrument & contract" subtitle="Market, contract type, barrier, duration and stake.">
-                <div className="grid grid-cols-2 gap-2.5">
-                  <Field label="Strategy name" className="col-span-2">
+              {/* ---- 1. Trade parameters ---- */}
+              <RootBlock colour={BLOCK_COLOUR.root} title="Trade parameters" subtitle="What to buy, on which market, for how long and how much">
+                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+                  <In label="Strategy name" className="col-span-2 sm:col-span-3">
                     <input type="text" value={draft.name} onChange={(e) => patch({ name: e.target.value })} placeholder="Descriptive name" />
-                  </Field>
-
-                  <Field
-                    label="Market"
-                    hint={s.symbols.length ? `${s.symbols.length} markets discovered from Deriv` : 'Common synthetic indices; connect for the full list'}
-                  >
-                    <select value={draft.market} onChange={(e) => patch({ market: e.target.value })}>
-                      {[...new Set([draft.market, s.activeSymbol, ...s.symbols.map((x) => x.underlying_symbol)])].map((m) => {
-                        const sym = s.symbols.find((x) => x.underlying_symbol === m);
-                        return (
+                  </In>
+                  <In label="Market">
+                    {s.symbols.length > 0 ? (
+                      <select value={draft.market} onChange={(e) => patch({ market: e.target.value })}>
+                        {Array.from(new Set([draft.market, ...s.symbols.map((x) => x.underlying_symbol)])).map((m) => (
                           <option key={m} value={m}>
-                            {sym ? `${sym.underlying_symbol_name} (${m})` : m}
+                            {s.symbols.find((x) => x.underlying_symbol === m)?.underlying_symbol_name ?? m} ({m})
                           </option>
-                        );
-                      })}
-                    </select>
-                  </Field>
-
-                  <Field label="Contract type">
-                    <select
-                      value={draft.contractType}
-                      onChange={(e) => {
-                        const v = e.target.value as ContractType;
-                        const meta = DIGIT_CONTRACTS.find((c) => c.value === v);
-                        patch({ contractType: v, barrier: meta?.barrier === 'none' ? undefined : (draft.barrier ?? 5) });
-                      }}
-                    >
+                        ))}
+                      </select>
+                    ) : (
+                      <select value={draft.market} onChange={(e) => patch({ market: e.target.value })}>
+                        {Array.from(new Set([draft.market, ...SIMULATOR_CATALOGUE.map((c) => c.symbol)])).map((m) => (
+                          <option key={m} value={m}>
+                            {SIMULATOR_CATALOGUE.find((c) => c.symbol === m)?.name ?? m} ({m})
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </In>
+                  <In label="Trade type">
+                    <select value={draft.contractType} onChange={(e) => patch({ contractType: e.target.value as ContractType })}>
                       {DIGIT_CONTRACTS.map((c) => (
-                        <option key={c.value} value={c.value}>{c.label} — {c.value}</option>
+                        <option key={c.value} value={c.value}>
+                          {c.label}
+                        </option>
                       ))}
                     </select>
-                  </Field>
-
-                  {contractMeta?.barrier !== 'none' && (
-                    <Field label="Barrier digit" hint="Deriv uses STRICT inequality for over/under: digit 5 with barrier 5 loses both ways.">
-                      <input type="number" min={0} max={9} step={1} value={draft.barrier ?? 5} onChange={(e) => patch({ barrier: Number(e.target.value) })} className="num" />
-                    </Field>
+                  </In>
+                  {contractMeta?.barrier === 'required' && (
+                    <In label="Barrier (digit)" hint="Strict inequality — the barrier digit loses both ways.">
+                      <input
+                        type="number"
+                        min={0}
+                        max={9}
+                        value={draft.barrier ?? 5}
+                        onChange={(e) => patch({ barrier: Math.min(9, Math.max(0, Number(e.target.value) || 0)) })}
+                      />
+                    </In>
                   )}
-
-                  <Field label="Stake" hint={`Clamped to ${money(s.settings.limits.minStake, '')}–${money(s.settings.limits.maxStake, '')} by the risk manager`}>
-                    <input type="number" min={0.35} step={0.05} value={draft.stake} onChange={(e) => patch({ stake: Number(e.target.value) })} className="num" />
-                  </Field>
-
-                  <Field label="Duration">
+                  <In label="Duration">
                     <div className="flex gap-1.5">
-                      <input type="number" min={1} step={1} value={draft.duration} onChange={(e) => patch({ duration: Number(e.target.value) })} className="num" />
+                      <input
+                        type="number"
+                        min={1}
+                        className="min-w-0 flex-1"
+                        value={draft.duration}
+                        onChange={(e) => patch({ duration: Math.max(1, Number(e.target.value) || 1) })}
+                      />
                       <select
+                        className="w-[92px] shrink-0"
                         value={draft.durationUnit}
                         onChange={(e) => patch({ durationUnit: e.target.value as Strategy['durationUnit'] })}
-                        className="w-[92px]"
                       >
-                        {DURATIONS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+                        {DURATIONS.map((d) => (
+                          <option key={d.value} value={d.value}>
+                            {d.label}
+                          </option>
+                        ))}
                       </select>
                     </div>
-                  </Field>
-
-                  <Field label="Currency">
-                    <input type="text" value={draft.currency} onChange={(e) => patch({ currency: e.target.value.toUpperCase() })} className="num" />
-                  </Field>
-
-                  <Field label="Cooldown between trades (s)" hint="Minimum pause after a settlement before the gate is re-evaluated.">
-                    <input type="number" min={0} step={1} value={draft.cooldownSeconds} onChange={(e) => patch({ cooldownSeconds: Number(e.target.value) })} className="num" />
-                  </Field>
-
-                  <Field label="Max trades (this strategy)">
-                    <input type="number" min={1} step={10} value={draft.maxTrades} onChange={(e) => patch({ maxTrades: Number(e.target.value) })} className="num" />
-                  </Field>
-
-                  <Field label="Max exposure" hint="Strategy-level cap; the global risk limit also applies and whichever is lower wins.">
-                    <input type="number" min={0} step={10} value={draft.maxExposure} onChange={(e) => patch({ maxExposure: Number(e.target.value) })} className="num" />
-                  </Field>
-
-                  <Field label="Notes" className="col-span-2">
-                    <textarea rows={2} value={draft.notes ?? ''} onChange={(e) => patch({ notes: e.target.value })} placeholder="Why does this strategy exist? What would falsify it?" />
-                  </Field>
-                </div>
-              </Card>
-
-              {/* ------------------------------------------- live gate + market */}
-              <div className="space-y-3">
-                <Card
-                  title="Live gate check"
-                  subtitle="The condition tree evaluated against the digits actually buffered right now."
-                  right={
-                    gateEval && (
-                      <Badge tone={gateEval.insufficientData ? 'warn' : gateEval.satisfied ? 'profit' : 'neutral'}>
-                        {gateEval.insufficientData ? 'NEEDS DATA' : gateEval.satisfied ? 'GATE OPEN' : 'GATE CLOSED'}
-                      </Badge>
-                    )
-                  }
-                >
-                  {gateEval && (
-                    <div className="space-y-2">
-                      <ul className="space-y-1">
-                        {gateEval.reasons.slice(0, 8).map((r, i) => (
-                          <li key={i} className="num flex items-start gap-1.5 text-[11px] leading-snug text-ink-2">
-                            <span className={r.startsWith('PASS') || r.includes('satisfied') ? 'text-profit' : r.startsWith('FAIL') ? 'text-loss' : 'text-ink-4'}>·</span>
-                            {r}
-                          </li>
+                  </In>
+                  <In label={`Stake (${draft.currency})`} hint="One unit for the progression below.">
+                    <input
+                      type="number"
+                      min={0.35}
+                      step={0.05}
+                      value={draft.stake}
+                      onChange={(e) => patch({ stake: Number(e.target.value) || 0, progression: draft.progression ? { ...draft.progression, unit: Number(e.target.value) || 0 } : undefined })}
+                    />
+                  </In>
+                  <In label="Stake progression" className="col-span-2">
+                    <div className="flex gap-1.5">
+                      <select
+                        value={progression.kind}
+                        onChange={(e) => patch({ progression: { kind: e.target.value as typeof progression.kind, unit: draft.stake, multiplier: progression.multiplier ?? 2 } })}
+                      >
+                        {PROGRESSION_ORDER.map((k) => (
+                          <option key={k} value={k}>
+                            {PROGRESSIONS[k].name}
+                          </option>
                         ))}
-                      </ul>
-                      {gateEval.insufficientData && (
-                        <Banner tone="warn">
-                          The gate needs {gateEval.requiredDigits} digits but only {s.digits.length} are buffered. Waiting for more ticks
-                          rather than guessing — an under-sampled gate reports “needs data”, never a false positive.
-                        </Banner>
+                      </select>
+                      {(progression.kind === 'martingale' || progression.kind === 'reverse_martingale') && (
+                        <input
+                          type="number"
+                          className="w-[76px] shrink-0"
+                          min={1.01}
+                          step={0.1}
+                          value={progression.multiplier ?? 2}
+                          onChange={(e) => patch({ progression: { ...progression, multiplier: Math.max(1.01, Number(e.target.value) || 2) } })}
+                          title="Multiplier"
+                        />
                       )}
-                      <div className="border-t border-line pt-2">
-                        <DigitStrip digits={s.digits} count={24} />
-                      </div>
                     </div>
-                  )}
-                </Card>
-
-                <Card title={`${s.activeSymbol} live`} subtitle="Buffered ticks for the currently selected market." pad={false}>
-                  <div className="h-[150px] p-2">
-                    <TickChart quotes={s.quotes} points={120} />
-                  </div>
-                </Card>
-              </div>
-            </div>
-
-            {/* --------------------------------------------- condition tree */}
-            <Card
-              title="Entry conditions"
-              subtitle="The gate that must open before a contract is bought. Nest AND/OR groups to any depth."
-              right={
-                <span className="num text-[10px] text-ink-4">
-                  {draft.id} · v{draft.version}
-                </span>
-              }
-            >
-              <ConditionTree group={draft.entry as ConditionGroup} onChange={(g) => patch({ entry: g })} />
-            </Card>
-
-            {/* ------------------------------------------------ run controls */}
-            <Card title="Execution" subtitle={`Mode: ${MODE_LABEL[s.settings.mode]} · data source: ${s.dataSource}`}>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  variant="success"
-                  size="lg"
-                  disabled={s.botState === 'running' || s.botState === 'starting' || s.botState === 'paused' || !validation?.valid || !dirty}
-                  onClick={async () => {
-                    if (!draft) return;
-                    if (dirty) {
-                      const r = await s.saveStrategy(draft);
-                      if (!r.ok) {
-                        setMsg({ ok: false, text: r.message });
-                        return;
-                      }
-                      setDirty(false);
-                    }
-                    const res = await s.runStrategy(draft.id);
-                    setMsg({ ok: res.ok, text: res.message });
-                  }}
-                  title={dirty ? 'Save before running — a running bot must execute a saved, versioned strategy' : undefined}
-                >
-                  <Play className="h-4 w-4" /> Run strategy
-                </Button>
-                <Button variant="outline" size="lg" disabled={s.botState !== 'running'} onClick={() => s.pauseBot()}>
-                  <Pause className="h-4 w-4" /> Pause
-                </Button>
-                <Button variant="outline" size="lg" disabled={s.botState !== 'paused'} onClick={() => s.resumeBot()}>
-                  <Zap className="h-4 w-4" /> Resume
-                </Button>
-                <Button variant="danger" size="lg" disabled={s.botState === 'idle' || s.botState === 'stopped'} onClick={() => s.stopBot('stopped from builder')}>
-                  <Square className="h-4 w-4" /> Stop
-                </Button>
-                <div className="ml-auto text-right">
-                  <div className="text-[10px] tracking-wider text-ink-4 uppercase">Bot state</div>
-                  <div className="num text-xs font-semibold text-ink">{s.botState.toUpperCase()}</div>
-                  {s.botDetail && <div className="max-w-[260px] truncate text-[10px] text-ink-4" title={s.botDetail}>{s.botDetail}</div>}
+                  </In>
                 </div>
-              </div>
+                <p className="mt-2 text-xxs leading-snug text-white/85">
+                  {progInfo.rule} After 10 consecutive losses the stake would reach{' '}
+                  <strong className="num">{worstCaseStake(progression, 10).toFixed(2)}</strong>, capped by your risk limit of{' '}
+                  <strong className="num">{draft.limits.maxStake.toFixed(2)}</strong>.
+                </p>
+              </RootBlock>
 
-              {dirty && (
-                <Banner tone="warn" className="mt-2.5">
-                  Unsaved changes. A bot always executes the <strong>saved</strong> version so that the recorded trades can be attributed to an
-                  exact strategy definition. Save first, then Run.
-                </Banner>
+              {/* ---- 2. Purchase conditions ---- */}
+              <div className="mb-1 flex items-center gap-2">
+                <span className="dt-section-title">Purchase conditions</span>
+                <span className="h-px flex-1 bg-line" />
+              </div>
+              <ConditionTree group={draft.entry} onChange={(entry) => patch({ entry })} />
+
+              {gateEval && (
+                <div className="dt-card p-3">
+                  <div className="flex items-center gap-2">
+                    <Badge tone={gateEval.satisfied ? 'profit' : 'neutral'}>{gateEval.satisfied ? 'Gate OPEN now' : 'Gate closed now'}</Badge>
+                    <span className="text-xxs text-less-prominent">
+                      Evaluated live against {s.digits.length} digits on {s.activeSymbol}
+                    </span>
+                  </div>
+                  {gateEval.reasons.length > 0 && (
+                    <ul className="mt-2 space-y-0.5">
+                      {gateEval.reasons.map((r, i) => (
+                        <li key={i} className="text-xxs leading-snug text-general">
+                          · {r}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {gateEval.insufficientData && (
+                    <p className="mt-2 text-xxs text-orange">
+                      Needs {gateEval.requiredDigits} digits, {s.digits.length} available. The bot waits rather than guessing.
+                    </p>
+                  )}
+                </div>
               )}
-              {!s.settings.limits.tradingEnabled && (
-                <Banner tone="info" className="mt-2.5">
-                  Trading is disabled globally. Save and edit freely; Run will refuse until you enable it in Risk settings.
-                </Banner>
-              )}
-            </Card>
-          </div>
-        )}
+
+              {/* ---- 3. Sell conditions ---- */}
+              <RootBlock colour={BLOCK_COLOUR.sell} title="Sell conditions" subtitle="When the session stops, not when an individual contract is sold">
+                <p className="mb-2 text-xxs leading-snug text-white/85">
+                  Every contract is held to settlement — this engine does not sell a contract early, and pretending
+                  otherwise would misreport your results. Take profit and stop loss below are session-level limits
+                  enforced by the risk manager across all contracts.
+                </p>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <In label="Take profit (session)">
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={draft.limits.maxSessionProfit}
+                      onChange={(e) => patch({ limits: { ...draft.limits, maxSessionProfit: Math.max(0, Number(e.target.value) || 0) } })}
+                    />
+                  </In>
+                  <In label="Stop loss (session)">
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={draft.limits.maxSessionLoss}
+                      onChange={(e) => patch({ limits: { ...draft.limits, maxSessionLoss: Math.max(0, Number(e.target.value) || 0) } })}
+                    />
+                  </In>
+                </div>
+              </RootBlock>
+
+              {/* ---- 4. Restart trading conditions ---- */}
+              <RootBlock colour={BLOCK_COLOUR.restart} title="Restart trading conditions" subtitle="Pacing and how far the bot is allowed to go">
+                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+                  <In label="Cooldown (s)">
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={draft.cooldownSeconds}
+                      onChange={(e) => patch({ cooldownSeconds: Math.max(0, Number(e.target.value) || 0) })}
+                    />
+                  </In>
+                  <In label="Max trades">
+                    <input
+                      type="number"
+                      min={1}
+                      value={draft.maxTrades}
+                      onChange={(e) => patch({ maxTrades: Math.max(1, Number(e.target.value) || 1), limits: { ...draft.limits, maxTrades: Math.max(1, Number(e.target.value) || 1) } })}
+                    />
+                  </In>
+                  <In label="Max exposure">
+                    <input
+                      type="number"
+                      min={0}
+                      value={draft.maxExposure}
+                      onChange={(e) => patch({ maxExposure: Math.max(0, Number(e.target.value) || 0) })}
+                    />
+                  </In>
+                  <In label="Max stake cap">
+                    <input
+                      type="number"
+                      min={0.35}
+                      step={0.5}
+                      value={draft.limits.maxStake}
+                      onChange={(e) => patch({ limits: { ...draft.limits, maxStake: Math.max(0.35, Number(e.target.value) || 0.35) } })}
+                    />
+                  </In>
+                </div>
+                <p className="mt-2 text-xxs leading-snug text-white/85">
+                  On a provider error or a lost connection the bot halts rather than continuing. A halted bot never
+                  resumes by itself.
+                </p>
+              </RootBlock>
+            </div>
+          )}
+        </div>
       </div>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------- toolbar */
+
+function Toolbar(props: {
+  draft: Strategy | null;
+  dirty: boolean;
+  canUndo: boolean;
+  canRedo: boolean;
+  strategies: Strategy[];
+  activeId: string | null;
+  onPick: (id: string) => void;
+  onNew: () => void;
+  onUndo: () => void;
+  onRedo: () => void;
+  onExport: () => void;
+  onImport: () => void;
+  onSaveAsNew: () => void;
+  onSave: () => void;
+  onQuick: () => void;
+}) {
+  const { draft, dirty, canUndo, canRedo, strategies, activeId } = props;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 border-b border-line bg-main-1 px-3 py-2">
+      <select
+        className="w-[210px]"
+        value={activeId ?? ''}
+        onChange={(e) => props.onPick(e.target.value)}
+        aria-label="Open a saved strategy"
+        title="Open a saved strategy"
+      >
+        <option value="">{strategies.length === 0 ? 'No saved strategies' : 'Open a bot…'}</option>
+        {strategies.map((st) => (
+          <option key={st.id} value={st.id}>
+            {st.name} (v{st.version})
+          </option>
+        ))}
+      </select>
+
+      <ToolButton label="Quick strategy" onClick={props.onQuick} icon={<Zap size={13} />} />
+      <ToolButton label="New" onClick={props.onNew} icon={<Copy size={13} />} />
+      <span className="mx-1 h-5 w-px bg-line" />
+      <ToolButton label="Undo" onClick={props.onUndo} disabled={!canUndo} icon={<RotateCcw size={13} />} />
+      <ToolButton label="Redo" onClick={props.onRedo} disabled={!canRedo} icon={<Redo2 size={13} />} />
+      <span className="mx-1 h-5 w-px bg-line" />
+      <ToolButton label="Import" onClick={props.onImport} icon={<Upload size={13} />} />
+      <ToolButton label="Export" onClick={props.onExport} disabled={!draft} icon={<Download size={13} />} />
+      <ToolButton label="Save as new" onClick={props.onSaveAsNew} disabled={!draft} icon={<Copy size={13} />} />
+
+      <span className="ml-auto flex items-center gap-2">
+        {dirty && <Badge tone="warn">Unsaved</Badge>}
+        {draft && <span className="num text-xxs text-less-prominent">v{draft.version + (dirty ? 1 : 0)}</span>}
+        <Button
+          variant="primary"
+          size="sm"
+          disabled={!draft || !dirty || (draft ? !validateStrategy(draft).valid : true)}
+          onClick={props.onSave}
+          title="Save this strategy as a new version"
+        >
+          <Save size={13} /> Save
+        </Button>
+      </span>
+    </div>
+  );
+}
+
+function ToolButton({
+  label,
+  onClick,
+  disabled,
+  icon,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  icon: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={label}
+      className="inline-flex items-center gap-1.5 rounded border border-transparent px-2 py-1.5 text-xs text-general transition-colors hover:border-line hover:bg-state-hover hover:text-prominent disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:border-transparent disabled:hover:bg-transparent"
+    >
+      {icon}
+      <span className="hidden xl:inline">{label}</span>
+    </button>
+  );
+}
+
+/* ------------------------------------------------------------- toolbox */
+
+function Toolbox({ onAdd, onAddGroup }: { onAdd: (kind: ConditionKind) => void; onAddGroup: () => void }) {
+  const [open, setOpen] = useState<Record<string, boolean>>({ digits: true, history: true, flow: true, logic: true });
+  const cats = Object.keys(CATEGORY_META) as (keyof typeof CATEGORY_META)[];
+
+  return (
+    <nav className="dt-toolbox" aria-label="Block toolbox">
+      <div className="border-b border-line px-3 py-2">
+        <span className="dt-section-title">Toolbox</span>
+        <p className="mt-0.5 text-xxs leading-snug text-less-prominent">Click a block to add it to the purchase conditions.</p>
+      </div>
+
+      {cats.map((cat) => (
+        <ToolboxCategory
+          key={cat}
+          label={CATEGORY_META[cat].label}
+          colour={CATEGORY_META[cat].colour}
+          open={Boolean(open[cat])}
+          onToggle={() => setOpen((o) => ({ ...o, [cat]: !o[cat] }))}
+        >
+          {KINDS.filter((k) => k.category === cat).map((k) => (
+            <button
+              key={k.value}
+              type="button"
+              onClick={() => onAdd(k.value)}
+              title={k.hint}
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left transition-opacity hover:opacity-80"
+              style={{ background: CATEGORY_META[cat].colour, color: '#fff' }}
+            >
+              <span className="text-xxs font-bold">{k.label}</span>
+            </button>
+          ))}
+        </ToolboxCategory>
+      ))}
+
+      <ToolboxCategory
+        label="Logic"
+        colour={GROUP_COLOUR_TOOLBOX}
+        open={Boolean(open.logic)}
+        onToggle={() => setOpen((o) => ({ ...o, logic: !o.logic }))}
+      >
+        <button
+          type="button"
+          onClick={onAddGroup}
+          title="Add a nested AND/OR group so conditions can be combined"
+          className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xxs font-bold text-white transition-opacity hover:opacity-80"
+          style={{ background: GROUP_COLOUR_TOOLBOX }}
+        >
+          AND / OR group
+        </button>
+      </ToolboxCategory>
+    </nav>
+  );
+}
+
+const GROUP_COLOUR_TOOLBOX = 'var(--color-block-var)';
+
+function ToolboxCategory({
+  label,
+  colour,
+  open,
+  onToggle,
+  children,
+}: {
+  label: string;
+  colour: string;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="border-b border-line">
+      <button type="button" className="dt-toolbox__cat" onClick={onToggle} aria-expanded={open}>
+        <span className="dt-toolbox__swatch" style={{ background: colour }} />
+        {label}
+        {open ? <ChevronDown size={13} className="ml-auto text-less-prominent" /> : <ChevronRight size={13} className="ml-auto text-less-prominent" />}
+      </button>
+      {open && <div className="flex flex-col gap-1 p-2">{children}</div>}
+    </div>
+  );
+}
+
+/* --------------------------------------------------------- block pieces */
+
+function RootBlock({
+  colour,
+  title,
+  subtitle,
+  children,
+}: {
+  colour: string;
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="dt-block dt-block--notch" style={{ background: colour }}>
+      <div className="dt-block__head">
+        <Check size={13} className="opacity-80" />
+        <span className="text-xs">{title}</span>
+        {subtitle && <span className="text-xxs font-normal opacity-75">· {subtitle}</span>}
+      </div>
+      <div className="dt-block__body">{children}</div>
+    </div>
+  );
+}
+
+/** A field inside a coloured block: white-on-colour label, inset control. */
+function In({ label, hint, children, className }: { label: string; hint?: string; children: React.ReactNode; className?: string }) {
+  return (
+    <label className={`block ${className ?? ''}`}>
+      <span className="mb-1 block text-xxs font-bold tracking-wide text-white/85 uppercase">{label}</span>
+      {children}
+      {hint && <span className="mt-0.5 block text-xxs leading-snug text-white/70">{hint}</span>}
+    </label>
   );
 }

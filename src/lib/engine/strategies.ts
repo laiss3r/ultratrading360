@@ -1,4 +1,5 @@
 import type { ConditionGroup } from './conditions';
+import type { ProgressionConfig } from './progressions';
 import { validateGroup } from './conditions';
 import type { ContractType } from '../deriv/contracts';
 import { ContractService } from '../deriv/contracts';
@@ -24,6 +25,15 @@ export interface Strategy {
   maxExposure: number;
   limits: RiskLimits;
   recovery: RecoveryConfig;
+  /**
+   * Named stake progression (Martingale, D'Alembert, Oscar's Grind, 1-3-2-6, ...).
+   *
+   * When present this governs the stake and the older `recovery` escalation is
+   * bypassed — applying both would compound two escalations into one. The risk
+   * manager still caps the result at `limits.maxStake`, so a progression can
+   * never out-run the user's own exposure limits.
+   */
+  progression?: ProgressionConfig;
   notes?: string;
 }
 
@@ -56,6 +66,7 @@ export function createStrategy(partial: Partial<Strategy> = {}): Strategy {
     maxExposure: partial.maxExposure ?? 100,
     limits: { ...DEFAULT_RISK_LIMITS, ...(partial.limits ?? {}) },
     recovery: { ...DEFAULT_RECOVERY, ...(partial.recovery ?? {}) },
+    progression: partial.progression,
     notes: partial.notes,
   };
 }

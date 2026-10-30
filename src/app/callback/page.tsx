@@ -97,10 +97,10 @@ function CallbackInner() {
     <div className="flex min-h-[70vh] items-center justify-center p-4">
       <Card className="w-full max-w-[520px]" title="Deriv sign-in">
         <div className="flex flex-col items-center gap-3 py-6 text-center">
-          <Icon className={`h-9 w-9 ${status === 'ok' ? 'text-profit' : status === 'error' ? 'text-loss' : 'animate-spin text-brand'}`} />
-          <p className="text-sm font-medium text-ink">{message}</p>
-          {detail && <p className="num max-w-[420px] text-[11px] leading-relaxed break-words text-ink-3">{detail}</p>}
-          {status === 'working' && <p className="text-[11px] text-ink-4">Exchanging the authorization code server-side…</p>}
+          <Icon className={`h-9 w-9 ${status === 'ok' ? 'text-profit' : status === 'error' ? 'text-loss' : 'animate-spin text-coral'}`} />
+          <p className="text-sm font-medium text-prominent">{message}</p>
+          {detail && <p className="num max-w-[420px] text-xxs leading-relaxed break-words text-less-prominent">{detail}</p>}
+          {status === 'working' && <p className="text-xxs text-less-prominent">Exchanging the authorization code server-side…</p>}
           {status === 'error' && (
             <div className="mt-2 w-full space-y-2">
               <Banner tone="warn">
@@ -120,7 +120,7 @@ function CallbackInner() {
 
 export default function CallbackPage() {
   return (
-    <Suspense fallback={<div className="p-8 text-center text-xs text-ink-3">Loading…</div>}>
+    <Suspense fallback={<div className="p-8 text-center text-xs text-less-prominent">Loading…</div>}>
       <CallbackInner />
     </Suspense>
   );

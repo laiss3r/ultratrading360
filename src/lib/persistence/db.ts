@@ -37,7 +37,18 @@ export interface AppSettings {
   /** Explicit acknowledgement that real money is at risk. Never defaults to true. */
   realTradingAcknowledged: boolean;
   acknowledgedAccountLoginid: string | null;
-  theme: 'dark';
+  /**
+   * Deriv's platforms are light-first with a dark option, offered from the
+   * footer rather than buried in settings.
+   *
+   * This is a NEW key, deliberately not the old `theme` field. The previous
+   * build hard-coded `theme: 'dark'` and offered no way to change it, so every
+   * stored value of `'dark'` is that forced default rather than a preference
+   * anyone expressed. Reading the old key would pin returning users to dark
+   * and hide the redesign; a fresh key starts them on light, and the footer
+   * toggle persists a real choice from here on.
+   */
+  uiTheme: 'light' | 'dark';
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -60,7 +71,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   recovery: { enabled: false, multiplier: 1.5, stepLimit: 4, maxStake: 25, maxDrawdown: 100 },
   realTradingAcknowledged: false,
   acknowledgedAccountLoginid: null,
-  theme: 'dark',
+  uiTheme: 'light',
 };
 
 async function available(): Promise<boolean> {

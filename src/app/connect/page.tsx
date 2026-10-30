@@ -38,7 +38,7 @@ export default function ConnectPage() {
   return (
     <div className="mx-auto max-w-[1100px] space-y-3 p-4">
       <Banner tone="info">
-        <strong className="font-semibold">Market data needs no credentials.</strong> Tick streams, digit extraction, proposals and the entire
+        <strong className="font-bold">Market data needs no credentials.</strong> Tick streams, digit extraction, proposals and the entire
         simulation engine already work without connecting anything. You only need to connect to place real or demo orders.
       </Banner>
 
@@ -54,7 +54,7 @@ export default function ConnectPage() {
               <>
                 <Banner tone="success">
                   An OAuth client is configured on the server. Redirect URI in use:{' '}
-                  <code className="num text-[11px]">{s.redirectUri || '—'}</code>
+                  <code className="num text-xxs">{s.redirectUri || '—'}</code>
                 </Banner>
                 <div className="flex gap-2">
                   <Button variant="primary" size="lg" className="flex-1" disabled={s.busy === 'oauth'} onClick={() => void s.startOAuth(false)}>
@@ -64,7 +64,7 @@ export default function ConnectPage() {
                     Sign up
                   </Button>
                 </div>
-                <p className="text-[11px] leading-relaxed text-ink-3">
+                <p className="text-xxs leading-relaxed text-less-prominent">
                   You are redirected to <code className="num">auth.deriv.com/oauth2/auth</code>. Deriv returns a one-time code to{' '}
                   <code className="num">{s.redirectUri || 'the callback route'}</code>; a server-side route exchanges it for a token using
                   the PKCE verifier. The token is stored in an encrypted <code className="num">httpOnly</code> cookie and is never exposed to
@@ -74,16 +74,16 @@ export default function ConnectPage() {
             ) : (
               <>
                 <Banner tone="warn">
-                  <strong className="font-semibold">OAuth is not available yet.</strong> The server has no{' '}
+                  <strong className="font-bold">OAuth is not available yet.</strong> The server has no{' '}
                   <code className="num">DERIV_OAUTH_CLIENT_ID</code>. Deriv issues OAuth client IDs by registering an application — an app ID
                   alone is not a client ID, and this cannot be worked around from the client.
                 </Banner>
-                <ol className="space-y-1.5 pl-4 text-[11.5px] leading-relaxed text-ink-2 list-decimal">
+                <ol className="space-y-1.5 pl-4 text-xs leading-relaxed text-general list-decimal">
                   <li>
-                    Go to <a className="text-accent underline" href="https://developers.deriv.com/dashboard/" target="_blank" rel="noreferrer">developers.deriv.com/dashboard</a> and register an application.
+                    Go to <a className="text-blue underline" href="https://developers.deriv.com/dashboard/" target="_blank" rel="noreferrer">developers.deriv.com/dashboard</a> and register an application.
                   </li>
                   <li>
-                    Set the redirect URI to exactly <code className="num text-accent">https://ultratrading360.vercel.app/callback</code> (and{' '}
+                    Set the redirect URI to exactly <code className="num text-blue">https://ultratrading360.vercel.app/callback</code> (and{' '}
                     <code className="num">http://localhost:3000/callback</code> for local development). Matching is exact — scheme, host and
                     trailing slash all count.
                   </li>
@@ -113,7 +113,7 @@ export default function ConnectPage() {
               hint={
                 <>
                   Create one at{' '}
-                  <a className="text-accent underline" href="https://app.deriv.com/account/api-token" target="_blank" rel="noreferrer">
+                  <a className="text-blue underline" href="https://app.deriv.com/account/api-token" target="_blank" rel="noreferrer">
                     app.deriv.com/account/api-token
                   </a>{' '}
                   with <strong>Read</strong> + <strong>Trade</strong> scopes. Grant <strong>Admin</strong> only if you need payments.
@@ -140,14 +140,14 @@ export default function ConnectPage() {
             {result && <Banner tone={result.ok ? 'success' : 'danger'}>{result.message}</Banner>}
 
             <Banner tone="warn">
-              <strong className="font-semibold">This app never asks for your Deriv password</strong> — only for an API token, which is what
+              <strong className="font-bold">This app never asks for your Deriv password</strong> — only for an API token, which is what
               Deriv’s own documentation prescribes for third-party applications. A non-empty token is not treated as valid: the server calls
               Deriv’s authorize endpoint and only accepts the credentials Deriv itself confirms, together with the account list they control.
               Tokens are held in an encrypted httpOnly cookie; they are not written to IndexedDB or to any log, and they are never returned to
               the browser.
             </Banner>
 
-            <p className="text-[11px] leading-relaxed text-ink-3">
+            <p className="text-xxs leading-relaxed text-less-prominent">
               PAT requests carry the required <code className="num">Deriv-App-ID</code> header (<code className="num">{s.appId}</code>). Deriv
               rejects PAT calls without it. OAuth bearer tokens do not need that header.
             </p>
@@ -188,19 +188,19 @@ export default function ConnectPage() {
             <Banner tone="info">
               Disconnect clears the encrypted session cookie in this browser. Deriv’s OAuth tokens have <strong>no refresh token and no
               revocation endpoint</strong>, so clearing the cookie does not invalidate the credential server-side — revoke an API token at{' '}
-              <a className="text-accent underline" href="https://app.deriv.com/account/api-token" target="_blank" rel="noreferrer">app.deriv.com/account/api-token</a>{' '}
+              <a className="text-blue underline" href="https://app.deriv.com/account/api-token" target="_blank" rel="noreferrer">app.deriv.com/account/api-token</a>{' '}
               if you want it permanently dead.
             </Banner>
 
             {s.accounts.length > 0 && (
               <div>
-                <div className="mb-1.5 text-[11px] font-medium tracking-wide text-ink-2">Accounts this token controls</div>
+                <div className="mb-1.5 text-xxs font-medium tracking-wide text-general">Accounts this token controls</div>
                 <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                   {s.accounts.map((a) => (
-                    <div key={a.loginid} className="flex items-center justify-between rounded-lg border border-line bg-base/40 px-3 py-2">
+                    <div key={a.loginid} className="flex items-center justify-between rounded border border-line bg-section-1 px-3 py-2">
                       <div>
-                        <div className="num text-xs font-semibold text-ink">{a.loginid}</div>
-                        <div className="num text-[11px] text-ink-3">
+                        <div className="num text-xs font-bold text-prominent">{a.loginid}</div>
+                        <div className="num text-xxs text-less-prominent">
                           {a.balance.toFixed(2)} {a.currency}
                         </div>
                       </div>
@@ -281,9 +281,9 @@ export default function ConnectPage() {
 
 function KV({ label, value, tone }: { label: string; value: string; tone?: 'loss' }) {
   return (
-    <div className="rounded-lg border border-line bg-base/40 px-3 py-2">
-      <div className="text-[9.5px] tracking-wider text-ink-4 uppercase">{label}</div>
-      <div className={`num mt-0.5 truncate text-[12px] font-medium ${tone === 'loss' ? 'text-loss' : 'text-ink'}`} title={value}>
+    <div className="rounded border border-line bg-section-1 px-3 py-2">
+      <div className="text-xxs tracking-wider text-less-prominent uppercase">{label}</div>
+      <div className={`num mt-0.5 truncate text-xs font-medium ${tone === 'loss' ? 'text-loss' : 'text-prominent'}`} title={value}>
         {value}
       </div>
     </div>

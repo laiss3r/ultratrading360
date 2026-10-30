@@ -33,6 +33,8 @@ export interface LogEntry {
   text: string;
 }
 
+export type RunPanelTab = 'summary' | 'transactions' | 'journal';
+
 export interface MarketRanking {
   symbol: string;
   name: string;
@@ -81,6 +83,22 @@ interface State {
   busy: string | null;
 
   rankings: MarketRanking[];
+
+  /**
+   * Run drawer state. Deriv Bot keeps Summary / Transactions / Journal in a
+   * fixed-width drawer on the right of the workspace rather than on separate
+   * routes, so the tab and its open/closed state are UI state, not navigation.
+   */
+  runPanelOpen: boolean;
+  runPanelTab: RunPanelTab;
+  /**
+   * Bot starts since the stats were last reset, for the Summary panel's
+   * "No. of runs" tile. Incremented only on a successful start — a resume does
+   * not count, which matches Deriv's definition of a run.
+   */
+  botRuns: number;
+  /** The Quick Strategy wizard is a modal in Deriv Bot, launched from the builder. */
+  quickStrategyOpen: boolean;
 }
 
 const MAX_QUOTES = 1200;
@@ -137,6 +155,10 @@ export const useApp = create<State & Actions>()((set, get) => ({
   log: [],
   busy: null,
   rankings: [],
+  runPanelOpen: true,
+  runPanelTab: 'summary',
+  botRuns: 0,
+  quickStrategyOpen: false,
 
   /* ---------------------------------------------------------- lifecycle */
 
@@ -174,6 +196,22 @@ export const useApp = create<State & Actions>()((set, get) => ({
 
   pushLog(level: LogEntry['level'], text: string) {
     set((s) => ({ log: [{ at: Date.now(), level, text }, ...s.log].slice(0, 400) }));
+  },
+
+  setRunPanelOpen(open: boolean) {
+    set({ runPanelOpen: open });
+  },
+
+  setRunPanelTab(tab: RunPanelTab) {
+    set({ runPanelTab: tab, runPanelOpen: true });
+  },
+
+  openQuickStrategy() {
+    set({ quickStrategyOpen: true });
+  },
+
+  closeQuickStrategy() {
+    set({ quickStrategyOpen: false });
   },
 
   clearLog() {
@@ -579,6 +617,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
     set({ bot, activeStrategyId: id, botState: 'starting', botDetail: '' });
     try {
       await bot.start(800);
+      set({ botRuns: get().botRuns + 1 });
       return { ok: true, message: 'Bot running.' };
     } catch (e) {
       const msg = (e as Error).message;
@@ -605,7 +644,9 @@ export const useApp = create<State & Actions>()((set, get) => ({
   async clearTrades(): Promise<void> {
     const { clearTrades } = await import('@/lib/persistence/db');
     await clearTrades();
-    set((s) => ({ trades: [], metrics: computeMetrics([], s.settings.simulationStartingBalance) }));
+    // Resetting the stats also resets the run counter, exactly as Deriv Bot's
+    // Reset button does — "No. of runs" is defined as runs since the last clear.
+    set((s) => ({ trades: [], botRuns: 0, metrics: computeMetrics([], s.settings.simulationStartingBalance) }));
     get().risk.resetAll(get().settings.simulationStartingBalance);
     set({ riskSnapshot: get().risk.getSnapshot() });
     get().pushLog('warn', 'Trade history cleared.');
@@ -645,4 +686,8 @@ interface Actions {
   stopBot: (reason?: string) => void;
   clearTrades: () => Promise<void>;
   resetRisk: () => void;
+  setRunPanelOpen: (open: boolean) => void;
+  setRunPanelTab: (tab: RunPanelTab) => void;
+  openQuickStrategy: () => void;
+  closeQuickStrategy: () => void;
 }

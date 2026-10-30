@@ -3,6 +3,7 @@ import { evaluateGroup, type DigitWindow } from './conditions';
 import { RiskManager, type RiskDecision } from './risk';
 import type { Strategy } from './strategies';
 import { validateStrategy } from './strategies';
+import { progressionStake } from './progressions';
 
 export type BotState = 'idle' | 'starting' | 'running' | 'paused' | 'stopping' | 'stopped' | 'halted' | 'error';
 
@@ -205,8 +206,16 @@ export class TradingBot {
 
     // Risk gate BEFORE pricing or purchase.
     const mode = this.provider.mode;
-    const baseStake = this.strategy.stake;
-    const suggested = this.risk.suggestRecoveryStake(baseStake);
+    // A configured progression owns the stake; otherwise fall back to the
+    // legacy recovery escalation. Never both — that would compound them.
+    const progression = this.strategy.progression;
+    const baseStake = progression
+      ? progressionStake(
+          progression,
+          this.trades.map((t) => ({ won: t.won, profit: t.profit })),
+        )
+      : this.strategy.stake;
+    const suggested = progression ? baseStake : this.risk.suggestRecoveryStake(baseStake);
     const decision = this.risk.evaluate(suggested, mode);
     this.events.onRisk?.(decision);
 

@@ -76,7 +76,7 @@ export default function HistoryPage() {
   return (
     <div className="mx-auto max-w-[1600px] space-y-3 p-4">
       <Banner tone="info">
-        <strong className="font-semibold">Simulation and live results are kept separate.</strong> They are never summed into one headline
+        <strong className="font-bold">Simulation and live results are kept separate.</strong> They are never summed into one headline
         figure. Every trade row records its own <code className="num">source</code> and <code className="num">mode</code>, so a profitable
         simulation can never be mistaken for profitable live trading.
       </Banner>
@@ -118,7 +118,7 @@ export default function HistoryPage() {
             <select
               value={strategyFilter}
               onChange={(e) => setStrategyFilter(e.target.value)}
-              className="w-[170px] text-[11px]"
+              className="w-[170px] text-xxs"
             >
               <option value="all">All strategies</option>
               {strategyIds.map(([id, name]) => (
@@ -147,8 +147,8 @@ export default function HistoryPage() {
           <Empty title="Nothing matches this filter">Trades are stored in IndexedDB in this browser only.</Empty>
         ) : (
           <div className="max-h-[560px] overflow-auto">
-            <table className="w-full text-left text-[11px]">
-              <thead className="sticky top-0 z-10 bg-elevated text-[9.5px] tracking-wider text-ink-3 uppercase">
+            <table className="w-full text-left text-xxs">
+              <thead className="sticky top-0 z-10 bg-section-1 text-xxs tracking-wider text-less-prominent uppercase">
                 <tr>
                   <th className="px-3 py-2">Time</th>
                   <th className="px-3 py-2">Strategy</th>
@@ -165,20 +165,20 @@ export default function HistoryPage() {
               </thead>
               <tbody>
                 {rows.slice(0, 500).map((t) => (
-                  <tr key={t.id} className="border-t border-line/60 align-middle hover:bg-hover/40">
-                    <td className="num whitespace-nowrap px-3 py-1.5 text-ink-3">{clock(t.closedAt)}</td>
-                    <td className="px-3 py-1.5 text-ink-2">
-                      {t.strategyName} <span className="num text-ink-4">v{t.strategyVersion}</span>
+                  <tr key={t.id} className="border-t border-line/60 align-middle hover:bg-state-hover/40">
+                    <td className="num whitespace-nowrap px-3 py-1.5 text-less-prominent">{clock(t.closedAt)}</td>
+                    <td className="px-3 py-1.5 text-general">
+                      {t.strategyName} <span className="num text-less-prominent">v{t.strategyVersion}</span>
                     </td>
-                    <td className="num px-3 py-1.5 text-ink-2">{t.symbol}</td>
-                    <td className="num px-3 py-1.5 text-ink-2">{t.contractType}{t.barrier ? ` @${t.barrier}` : ''}</td>
-                    <td className="num px-3 py-1.5 text-right text-ink-2">{t.stake.toFixed(2)}</td>
-                    <td className="num px-3 py-1.5 text-right text-ink-2">{t.payout.toFixed(2)}</td>
-                    <td className={`num px-3 py-1.5 text-right font-semibold ${t.profit >= 0 ? 'text-profit' : 'text-loss'}`}>{signed(t.profit)}</td>
-                    <td className="num px-3 py-1.5 text-center text-ink-3">
+                    <td className="num px-3 py-1.5 text-general">{t.symbol}</td>
+                    <td className="num px-3 py-1.5 text-general">{t.contractType}{t.barrier ? ` @${t.barrier}` : ''}</td>
+                    <td className="num px-3 py-1.5 text-right text-general">{t.stake.toFixed(2)}</td>
+                    <td className="num px-3 py-1.5 text-right text-general">{t.payout.toFixed(2)}</td>
+                    <td className={`num px-3 py-1.5 text-right font-bold ${t.profit >= 0 ? 'text-profit' : 'text-loss'}`}>{signed(t.profit)}</td>
+                    <td className="num px-3 py-1.5 text-center text-less-prominent">
                       {t.entryDigit ?? '—'} → {t.exitDigit ?? '—'}
                     </td>
-                    <td className="num px-3 py-1.5 text-right text-ink-3">{t.balanceAfter.toFixed(2)}</td>
+                    <td className="num px-3 py-1.5 text-right text-less-prominent">{t.balanceAfter.toFixed(2)}</td>
                     <td className="px-3 py-1.5">
                       {t.source === 'deriv_live' ? (
                         <Badge tone={t.mode === 'deriv_real' ? 'loss' : 'info'}>{t.mode === 'deriv_real' ? 'REAL' : 'DEMO'}</Badge>
@@ -188,20 +188,20 @@ export default function HistoryPage() {
                     </td>
                     <td className="px-3 py-1.5">
                       {t.error ? (
-                        <span className="num max-w-[190px] truncate text-[10px] text-loss" title={t.error}>{t.error}</span>
+                        <span className="num max-w-[190px] truncate text-xxs text-loss" title={t.error}>{t.error}</span>
                       ) : (t.riskReasons?.length ?? 0) + (t.gateReasons?.length ?? 0) > 0 ? (
-                        <span className="num max-w-[190px] truncate text-[10px] text-warn" title={[...(t.riskReasons ?? []), ...(t.gateReasons ?? [])].join(' · ')}>
+                        <span className="num max-w-[190px] truncate text-xxs text-orange" title={[...(t.riskReasons ?? []), ...(t.gateReasons ?? [])].join(' · ')}>
                           {[...(t.riskReasons ?? []), ...(t.gateReasons ?? [])].join(' · ')}
                         </span>
                       ) : (
-                        <span className="text-ink-4">—</span>
+                        <span className="text-less-prominent">—</span>
                       )}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            {rows.length > 500 && <div className="px-3 py-2 text-[11px] text-ink-4">Showing the 500 most recent. Export CSV for the full set.</div>}
+            {rows.length > 500 && <div className="px-3 py-2 text-xxs text-less-prominent">Showing the 500 most recent. Export CSV for the full set.</div>}
           </div>
         )}
       </Card>
@@ -253,12 +253,12 @@ function group<T>(rows: T[], key: (r: T) => string) {
 function Breakdown({ title, rows }: { title: string; rows: { label: string; count: number; net: number; wins: number }[] }) {
   return (
     <div>
-      <div className="mb-1.5 text-[11px] font-medium tracking-wide text-ink-2">{title}</div>
+      <div className="mb-1.5 text-xxs font-medium tracking-wide text-general">{title}</div>
       {rows.length === 0 ? (
-        <div className="text-[11px] text-ink-4">No data.</div>
+        <div className="text-xxs text-less-prominent">No data.</div>
       ) : (
-        <table className="w-full text-left text-[11px]">
-          <thead className="text-[9.5px] tracking-wider text-ink-4 uppercase">
+        <table className="w-full text-left text-xxs">
+          <thead className="text-xxs tracking-wider text-less-prominent uppercase">
             <tr>
               <th className="py-1">Name</th>
               <th className="py-1 text-right">Trades</th>
@@ -269,10 +269,10 @@ function Breakdown({ title, rows }: { title: string; rows: { label: string; coun
           <tbody>
             {rows.slice(0, 8).map((r) => (
               <tr key={r.label} className="border-t border-line/50">
-                <td className="max-w-[190px] truncate py-1 text-ink-2" title={r.label}>{r.label}</td>
-                <td className="num py-1 text-right text-ink-3">{r.count}</td>
-                <td className="num py-1 text-right text-ink-3">{r.count ? pct(r.wins / r.count, 0) : '—'}</td>
-                <td className={`num py-1 text-right font-semibold ${r.net >= 0 ? 'text-profit' : 'text-loss'}`}>{signed(r.net)}</td>
+                <td className="max-w-[190px] truncate py-1 text-general" title={r.label}>{r.label}</td>
+                <td className="num py-1 text-right text-less-prominent">{r.count}</td>
+                <td className="num py-1 text-right text-less-prominent">{r.count ? pct(r.wins / r.count, 0) : '—'}</td>
+                <td className={`num py-1 text-right font-bold ${r.net >= 0 ? 'text-profit' : 'text-loss'}`}>{signed(r.net)}</td>
               </tr>
             ))}
           </tbody>
