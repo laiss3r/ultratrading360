@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <rect width="64" height="64" rx="14" fill="#0b0e11"/>
+  <!-- candlestick mark: an up candle and a down candle, the two states a trade resolves to -->
+  <g stroke="#f0b90b" stroke-width="3" stroke-linecap="round">
+    <line x1="22" y1="12" x2="22" y2="52"/>
+  </g>
+  <rect x="15" y="22" width="14" height="22" rx="2.5" fill="#16c784"/>
+  <g stroke="#5b6472" stroke-width="3" stroke-linecap="round">
+    <line x1="42" y1="16" x2="42" y2="48"/>
+  </g>
+  <rect x="35" y="26" width="14" height="16" rx="2.5" fill="#ea3943"/>
+</svg>
