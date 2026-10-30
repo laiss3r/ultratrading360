@@ -12,7 +12,7 @@ export interface BacktestConfig {
   contractType: ContractType;
   barrier?: number;
   stake: number;
-  /** Payout multiplier actually quoted by the broker, or a theoretical value in simulation. */
+  /** Payout multiplier actually quoted by the broker, never an assumed 2x. */
   payoutMultiplier: number;
   /** Fraction of the sample reserved for out-of-sample evaluation. */
   holdoutFraction?: number;

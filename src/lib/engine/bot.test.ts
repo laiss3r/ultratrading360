@@ -12,7 +12,7 @@ import type { ContractType } from '../deriv/contracts';
  */
 class ScriptedProvider implements MarketProvider {
   mode: AccountMode;
-  source: 'simulation' | 'deriv_live';
+  readonly source = 'deriv_live' as const;
   connected = true;
   quoteHandlers: Array<(q: Quote) => void> = [];
   priceCalls = 0;
@@ -22,9 +22,8 @@ class ScriptedProvider implements MarketProvider {
   private n = 0;
   pipSize = 2;
 
-  constructor(mode: AccountMode = 'simulation', private payoutMult = 1.96) {
+  constructor(mode: AccountMode = 'deriv_demo', private payoutMult = 1.96) {
     this.mode = mode;
-    this.source = mode === 'simulation' ? 'simulation' : 'deriv_live';
   }
 
   async connect() {
@@ -407,7 +406,7 @@ describe('gate evaluation', () => {
 
 describe('trade record integrity', () => {
   it('records provenance, balance movement and reasons', async () => {
-    const provider = new ScriptedProvider('simulation');
+    const provider = new ScriptedProvider('deriv_demo');
     provider.settleAs = 'win';
     const bot = new TradingBot(
       alwaysStrategy(),
@@ -420,8 +419,8 @@ describe('trade record integrity', () => {
     provider.push('R_100', 7);
     await flush();
     const t = bot.getTrades()[0];
-    expect(t.source).toBe('simulation');
-    expect(t.mode).toBe('simulation');
+    expect(t.source).toBe('deriv_live');
+    expect(t.mode).toBe('deriv_demo');
     expect(t.won).toBe(true);
     expect(t.profit).toBeCloseTo(0.96, 2);
     expect(t.balanceBefore).toBe(1000);
@@ -452,8 +451,8 @@ describe('trade record integrity', () => {
     expect(bot.getBalance()).toBe(499);
   });
 
-  it('never mixes simulated and real provenance in one record', async () => {
-    const sim = new ScriptedProvider('simulation');
+  it('every record carries Deriv provenance and the account mode it ran on', async () => {
+    const sim = new ScriptedProvider('deriv_real');
     const bot = new TradingBot(
       alwaysStrategy(),
       sim,
@@ -464,8 +463,8 @@ describe('trade record integrity', () => {
     sim.push('R_100', 7);
     await flush();
     for (const t of bot.getTrades()) {
-      expect(t.source === 'simulation' ? t.mode : t.mode).toBeDefined();
-      if (t.source === 'simulation') expect(t.mode).toBe('simulation');
+      expect(t.source).toBe('deriv_live');
+      expect(t.mode).toBe('deriv_real');
     }
   });
 });

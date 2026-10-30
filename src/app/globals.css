@@ -572,6 +572,10 @@ body {
 
 /* ---------------- Form controls ---------------- */
 
+/* Element resets live in the base cascade layer so that Tailwind utilities
+   (utilities layer) can still override them — an unlayered rule would beat every
+   utility, which is how `w-[92px]` on a select lost to `width: 100%` here. */
+@layer base {
 input[type="number"],
 input[type="text"],
 input[type="password"],
@@ -607,6 +611,7 @@ input::placeholder,
 textarea::placeholder {
   color: var(--color-less-prominent);
 }
+}
 
 .dt-label {
   display: block;
@@ -619,4 +624,111 @@ textarea::placeholder {
   font-size: var(--text-xxs);
   color: var(--color-less-prominent);
   margin-top: 3px;
+}
+
+/* ------------------------------------------------------------------ *
+ * Collapse control and mobile backdrop for the run drawer
+ * ------------------------------------------------------------------ */
+
+.dt-runpanel__collapse {
+  position: absolute;
+  top: 50%;
+  right: var(--dt-runpanel-w);
+  transform: translateY(-50%);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 56px;
+  border: 1px solid var(--color-border-normal);
+  border-right: 0;
+  border-radius: 4px 0 0 4px;
+  background: var(--color-main-1);
+  color: var(--color-less-prominent);
+}
+.dt-runpanel__collapse:hover {
+  color: var(--color-coral);
+}
+
+.dt-runpanel-backdrop {
+  display: none;
+  position: fixed;
+  inset: var(--dt-header-h) 0 var(--dt-footer-h) 0;
+  z-index: 65;
+  background: rgb(14 14 14 / 0.45);
+  border: 0;
+  padding: 0;
+}
+
+/* ------------------------------------------------------------------ *
+ * Responsive behaviour.
+ *
+ * Deriv's own products collapse the same way: the run drawer becomes an
+ * overlay instead of stealing horizontal space, the toolbox stacks above
+ * the workspace, and wide tables scroll rather than crushing their cells.
+ * ------------------------------------------------------------------ */
+@media (max-width: 1023.98px) {
+  .dt-tabs {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .dt-tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .dt-toolbox {
+    width: 100%;
+    max-height: 210px;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border-normal);
+  }
+  .dt-runpanel {
+    position: fixed;
+    top: var(--dt-header-h);
+    bottom: var(--dt-footer-h);
+    right: 0;
+    z-index: 70;
+    width: min(var(--dt-runpanel-w), 100%);
+    box-shadow: -12px 0 28px rgb(14 14 14 / 0.22);
+  }
+  .dt-runpanel__collapse {
+    top: 8px;
+    right: 8px;
+    transform: none;
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--color-border-normal);
+    border-radius: 4px;
+  }
+  .dt-drawer-handle {
+    display: none;
+  }
+  .dt-runpanel-backdrop {
+    display: block;
+  }
+}
+
+@media (max-width: 767.98px) {
+  .dt-card table,
+  .dt-runpanel table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  .dt-workspace {
+    padding: 10px;
+  }
+}
+
+@media (max-width: 640px) {
+  .dt-btn {
+    min-height: 38px;
+  }
+  .dt-tab {
+    min-height: 44px;
+  }
+  .dt-header {
+    padding-inline: 8px;
+    gap: 8px;
+  }
 }

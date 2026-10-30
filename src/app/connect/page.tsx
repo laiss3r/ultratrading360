@@ -38,8 +38,8 @@ export default function ConnectPage() {
   return (
     <div className="mx-auto max-w-[1100px] space-y-3 p-4">
       <Banner tone="info">
-        <strong className="font-bold">Market data needs no credentials.</strong> Tick streams, digit extraction, proposals and the entire
-        simulation engine already work without connecting anything. You only need to connect to place real or demo orders.
+        <strong className="font-bold">Market data needs no credentials.</strong> Tick streams, digit extraction, proposals and
+        statistics already work without connecting anything. You only need to connect to place demo or real orders.
       </Banner>
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
@@ -220,8 +220,8 @@ export default function ConnectPage() {
           <Banner tone="info">
             <span className="flex items-center gap-2">
               <LogOut className="h-3.5 w-3.5 shrink-0" />
-              No account connected. Current mode is <strong>{MODE_LABEL[s.settings.mode]}</strong>. Simulation runs entirely in this browser
-              with a seeded, reproducible RNG and never contacts Deriv for orders.
+              No account connected. Market data is streaming from Deriv&apos;s public socket; to place orders on{' '}
+              <strong>{MODE_LABEL[s.settings.mode]}</strong> connect with an API token or OAuth above.
             </span>
           </Banner>
         )}

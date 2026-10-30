@@ -4,8 +4,9 @@ import { useState } from 'react';
 import { ChevronLeft, ChevronRight, Pause, Play, Square, Zap } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { useApp, type RunPanelTab } from '@/state/store';
+import type { AccountMode } from '@/lib/deriv/types';
 import { Badge, Button, ContractCard, Modal, Money, Tabs } from './ui';
-import { SOURCE_LABEL } from '@/lib/format';
+import { MODE_LABEL, SOURCE_LABEL } from '@/lib/format';
 
 /**
  * The run drawer, positioned and composed as Deriv Bot does it: a fixed 366px
@@ -15,7 +16,7 @@ import { SOURCE_LABEL } from '@/lib/format';
  *
  * ONE DEPARTURE, and it is deliberate. Deriv sums every contract into one set of
  * totals because a Deriv bot only ever trades one feed. This platform also runs a
- * fully offline simulation, and adding simulated profit to real profit would
+ * different account, and adding demo results to real results would
  * produce a number that describes nothing. The tiles therefore report the feed
  * that is currently selected, and say which feed that is.
  */
@@ -38,7 +39,16 @@ export function RunPanel() {
   }
 
   return (
-    <aside className="dt-runpanel" aria-label="Run panel">
+    <>
+      {/* On narrow screens the drawer overlays the page; this is its scrim. */}
+      <button
+        type="button"
+        className="dt-runpanel-backdrop"
+        onClick={() => setOpen(false)}
+        aria-label="Close run panel"
+        tabIndex={-1}
+      />
+      <aside className="dt-runpanel" aria-label="Run panel">
       <RunControls />
       <PanelTabs />
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -47,14 +57,15 @@ export function RunPanel() {
       <PanelFooter />
       <button
         type="button"
-        className="absolute right-[var(--dt-runpanel-w)] top-1/2 z-30 flex h-14 w-[18px] -translate-y-1/2 items-center justify-center rounded-l border border-r-0 border-line bg-main-1 text-less-prominent hover:text-coral"
+        className="dt-runpanel__collapse"
         onClick={() => setOpen(false)}
         aria-label="Collapse run panel"
         title="Collapse run panel"
       >
         <ChevronRight size={14} />
       </button>
-    </aside>
+      </aside>
+    </>
   );
 }
 
@@ -170,14 +181,13 @@ interface Totals {
   count: number;
 }
 
-/** Totals for ONE feed only. Simulation and live are never added together. */
-function useTotals(): { totals: Totals; feed: 'simulation' | 'deriv_live'; other: number } {
+/** Totals for ONE account mode only. Demo and real are never added together. */
+function useTotals(): { totals: Totals; mode: AccountMode; other: number } {
   const trades = useApp((s) => s.trades);
-  const dataSource = useApp((s) => s.dataSource);
+  const mode = useApp((s) => s.settings.mode);
   const botRuns = useApp((s) => s.botRuns);
 
-  const feed: 'simulation' | 'deriv_live' = dataSource === 'deriv_live' ? 'deriv_live' : 'simulation';
-  const mine = trades.filter((t) => t.source === feed);
+  const mine = trades.filter((t) => t.mode === mode);
   const settled = mine.filter((t) => !t.error);
 
   const stake = settled.reduce((a, t) => a + t.stake, 0);
@@ -192,13 +202,13 @@ function useTotals(): { totals: Totals; feed: 'simulation' | 'deriv_live'; other
       profit: payout - stake,
       count: mine.length,
     },
-    feed,
+    mode,
     other: trades.length - mine.length,
   };
 }
 
 function StatisticsSummary() {
-  const { totals, feed, other } = useTotals();
+  const { totals, mode, other } = useTotals();
   const session = useApp((s) => s.session);
   const currency = session?.currency ?? 'USD';
   const [info, setInfo] = useState(false);
@@ -207,7 +217,7 @@ function StatisticsSummary() {
     <div className="p-3">
       <div className="mb-2 flex items-center justify-between">
         <span className="dt-section-title">
-          {feed === 'deriv_live' ? 'Live statistics' : 'Simulation statistics'}
+          {mode === 'deriv_real' ? 'Real account statistics' : 'Demo account statistics'}
         </span>
         <button type="button" className="text-xxs text-coral hover:underline" onClick={() => setInfo(true)}>
           What&apos;s this?
@@ -234,9 +244,9 @@ function StatisticsSummary() {
       </div>
 
       <p className="mt-2 text-xxs leading-relaxed text-less-prominent">
-        Showing <strong className="text-general">{SOURCE_LABEL[feed]}</strong> contracts only.
-        {other > 0 && <> {other} contract{other === 1 ? '' : 's'} from the other feed are excluded — simulated and live results are never summed.</>}
-        {other === 0 && ' No contracts from the other feed exist yet.'}
+        Showing <strong className="text-general">{MODE_LABEL[mode]}</strong> contracts only.
+        {other > 0 && <> {other} contract{other === 1 ? '' : 's'} from the other account are excluded — demo and real results are never summed.</>}
+        {other === 0 && ' No contracts on the other account exist yet.'}
       </p>
 
       <StatisticsInfoModal open={info} onClose={() => setInfo(false)} />
@@ -294,9 +304,8 @@ function PanelBody() {
 
 function SummaryTab() {
   const trades = useApp((s) => s.trades);
-  const dataSource = useApp((s) => s.dataSource);
-  const feed = dataSource === 'deriv_live' ? 'deriv_live' : 'simulation';
-  const latest = trades.find((t) => t.source === feed);
+  const mode = useApp((s) => s.settings.mode);
+  const latest = trades.find((t) => t.mode === mode);
 
   return (
     <div className="flex flex-col gap-3">
@@ -313,7 +322,7 @@ function SummaryTab() {
           />
         ) : (
           <p className="rounded border border-line bg-section-1 px-3 py-4 text-center text-xs text-less-prominent">
-            No contracts on this feed yet.
+            No contracts on this account yet.
           </p>
         )}
       </div>
@@ -324,12 +333,11 @@ function SummaryTab() {
 
 function TransactionsTab() {
   const trades = useApp((s) => s.trades);
-  const dataSource = useApp((s) => s.dataSource);
-  const feed = dataSource === 'deriv_live' ? 'deriv_live' : 'simulation';
-  const rows = trades.filter((t) => t.source === feed).slice(0, 200);
+  const mode = useApp((s) => s.settings.mode);
+  const rows = trades.filter((t) => t.mode === mode).slice(0, 200);
 
   if (rows.length === 0) {
-    return <p className="p-4 text-center text-xs text-less-prominent">No transactions on this feed.</p>;
+    return <p className="p-4 text-center text-xs text-less-prominent">No transactions on this account.</p>;
   }
 
   return (

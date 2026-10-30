@@ -174,7 +174,7 @@ export default function OverlordPage() {
             stopped by the risk manager and not by a UI timer.
           </p>
         </div>
-        <Badge tone={s.settings.mode === 'deriv_real' ? 'loss' : s.settings.mode === 'deriv_demo' ? 'info' : 'brand'}>
+        <Badge tone={s.settings.mode === 'deriv_real' ? 'loss' : 'info'}>
           {MODE_LABEL[s.settings.mode]}
         </Badge>
       </div>
@@ -427,7 +427,7 @@ export default function OverlordPage() {
                   or in Risk settings.
                 </Banner>
               )}
-              {s.settings.mode !== 'simulation' && !s.session && (
+              {!s.session && (
                 <Banner tone="warn">{MODE_LABEL[s.settings.mode]} requires a connected Deriv account. Market data still streams.</Banner>
               )}
 

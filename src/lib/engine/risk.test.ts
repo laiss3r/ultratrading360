@@ -10,7 +10,7 @@ const enabled = (patch: Partial<RiskLimits> = {}): RiskLimits => ({
 describe('RiskManager kill switches', () => {
   it('refuses everything while tradingEnabled is false', () => {
     const rm = new RiskManager({ ...DEFAULT_RISK_LIMITS, tradingEnabled: false });
-    const d = rm.evaluate(1, 'simulation');
+    const d = rm.evaluate(1, 'deriv_demo');
     expect(d.allowed).toBe(false);
     expect(d.halt).toBe(true);
     expect(d.haltReason).toBe('trading_disabled');
@@ -22,8 +22,8 @@ describe('RiskManager kill switches', () => {
     const real = rm.evaluate(1, 'deriv_real');
     expect(real.allowed).toBe(false);
     expect(real.haltReason).toBe('real_not_acknowledged');
-    // ...but simulation and demo are unaffected
-    expect(rm.evaluate(1, 'simulation').allowed).toBe(true);
+    // ...and demo is unaffected
+    expect(rm.evaluate(1, 'deriv_demo').allowed).toBe(true);
     expect(rm.evaluate(1, 'deriv_demo').allowed).toBe(true);
   });
 
@@ -36,7 +36,7 @@ describe('RiskManager kill switches', () => {
 describe('stake clamping', () => {
   it('caps the stake at maxStake', () => {
     const rm = new RiskManager(enabled({ maxStake: 5 }));
-    const d = rm.evaluate(100, 'simulation');
+    const d = rm.evaluate(100, 'deriv_demo');
     expect(d.allowed).toBe(true);
     expect(d.stake).toBe(5);
     expect(d.clamped).toBe(true);
@@ -45,13 +45,13 @@ describe('stake clamping', () => {
 
   it('raises the stake to the broker minimum', () => {
     const rm = new RiskManager(enabled({ minStake: 0.35 }));
-    const d = rm.evaluate(0.01, 'simulation');
+    const d = rm.evaluate(0.01, 'deriv_demo');
     expect(d.stake).toBe(0.35);
   });
 
   it('leaves an in-range stake untouched', () => {
     const rm = new RiskManager(enabled({ minStake: 0.35, maxStake: 10 }));
-    const d = rm.evaluate(2.5, 'simulation');
+    const d = rm.evaluate(2.5, 'deriv_demo');
     expect(d.stake).toBe(2.5);
     expect(d.clamped).toBe(false);
   });
@@ -61,7 +61,7 @@ describe('exposure limits', () => {
   it('reduces the stake to the remaining open exposure', () => {
     const rm = new RiskManager(enabled({ maxOpenExposure: 10, maxStake: 100 }));
     rm.openExposure(8);
-    const d = rm.evaluate(50, 'simulation');
+    const d = rm.evaluate(50, 'deriv_demo');
     expect(d.allowed).toBe(true);
     expect(d.stake).toBe(2);
   });
@@ -69,7 +69,7 @@ describe('exposure limits', () => {
   it('refuses when open exposure is exhausted', () => {
     const rm = new RiskManager(enabled({ maxOpenExposure: 10 }));
     rm.openExposure(10);
-    const d = rm.evaluate(1, 'simulation');
+    const d = rm.evaluate(1, 'deriv_demo');
     expect(d.allowed).toBe(false);
     expect(d.haltReason).toBe('max_open_exposure');
     expect(d.halt).toBe(false); // transient: a settlement frees room
@@ -79,7 +79,7 @@ describe('exposure limits', () => {
     const rm = new RiskManager(enabled({ maxSessionExposure: 10, maxStake: 100 }));
     rm.openExposure(10);
     rm.closeExposure(10, 0); // exposure freed but session total consumed
-    const d = rm.evaluate(1, 'simulation');
+    const d = rm.evaluate(1, 'deriv_demo');
     expect(d.allowed).toBe(false);
     expect(d.halt).toBe(true);
     expect(d.haltReason).toBe('max_session_exposure');
@@ -92,11 +92,11 @@ describe('loss, drawdown and trade-count halts', () => {
     rm.openExposure(30);
     rm.closeExposure(30, -30, new Date());
     rm.setEquity(970);
-    expect(rm.evaluate(1, 'simulation').halt).toBe(false);
+    expect(rm.evaluate(1, 'deriv_demo').halt).toBe(false);
     rm.openExposure(30);
     rm.closeExposure(30, -25);
     rm.setEquity(945);
-    const d = rm.evaluate(1, 'simulation');
+    const d = rm.evaluate(1, 'deriv_demo');
     expect(d.halt).toBe(true);
     expect(d.haltReason).toBe('session_loss');
   });
@@ -106,7 +106,7 @@ describe('loss, drawdown and trade-count halts', () => {
     rm.openExposure(25);
     rm.closeExposure(25, -25);
     rm.setEquity(975);
-    expect(rm.evaluate(1, 'simulation').haltReason).toBe('daily_loss');
+    expect(rm.evaluate(1, 'deriv_demo').haltReason).toBe('daily_loss');
   });
 
   it('resets the daily counter at UTC midnight', () => {
@@ -115,17 +115,17 @@ describe('loss, drawdown and trade-count halts', () => {
     rm.openExposure(20);
     rm.closeExposure(20, -20, day1);
     rm.setEquity(980);
-    expect(rm.evaluate(1, 'simulation', day1).halt).toBe(true);
+    expect(rm.evaluate(1, 'deriv_demo', day1).halt).toBe(true);
     const day2 = new Date('2026-03-02T00:01:00Z');
     // A new UTC day clears the daily loss counter.
-    expect(rm.evaluate(1, 'simulation', day2).halt).toBe(false);
+    expect(rm.evaluate(1, 'deriv_demo', day2).halt).toBe(false);
   });
 
   it('halts at the max drawdown percentage', () => {
     const rm = new RiskManager(enabled({ maxDrawdownPct: 0.1, maxSessionLoss: 1e9, maxDailyLoss: 1e9 }), { ...DEFAULT_RECOVERY }, 1000);
     rm.setEquity(1200); // new peak
     rm.setEquity(1079); // 10.08% below peak
-    const d = rm.evaluate(1, 'simulation');
+    const d = rm.evaluate(1, 'deriv_demo');
     expect(d.halt).toBe(true);
     expect(d.haltReason).toBe('drawdown');
   });
@@ -133,7 +133,7 @@ describe('loss, drawdown and trade-count halts', () => {
   it('maxDrawdownPct of 0 disables the drawdown halt', () => {
     const rm = new RiskManager(enabled({ maxDrawdownPct: 0, maxSessionLoss: 1e9, maxDailyLoss: 1e9 }), { ...DEFAULT_RECOVERY }, 1000);
     rm.setEquity(10);
-    expect(rm.evaluate(1, 'simulation').haltReason).not.toBe('drawdown');
+    expect(rm.evaluate(1, 'deriv_demo').haltReason).not.toBe('drawdown');
   });
 
   it('halts at maxTrades', () => {
@@ -142,7 +142,7 @@ describe('loss, drawdown and trade-count halts', () => {
       rm.openExposure(1);
       rm.closeExposure(1, 1);
     }
-    const d = rm.evaluate(1, 'simulation');
+    const d = rm.evaluate(1, 'deriv_demo');
     expect(d.halt).toBe(true);
     expect(d.haltReason).toBe('max_trades');
   });
@@ -185,7 +185,7 @@ describe('recovery mode can never override a risk limit', () => {
     }
     const suggested = rm.suggestRecoveryStake(1); // 125
     expect(suggested).toBe(4); // clamped by limits.maxStake inside suggestRecoveryStake
-    const d = rm.evaluate(suggested, 'simulation');
+    const d = rm.evaluate(suggested, 'deriv_demo');
     expect(d.stake).toBeLessThanOrEqual(4);
   });
 
@@ -196,7 +196,7 @@ describe('recovery mode can never override a risk limit', () => {
     rm.openExposure(40);
     rm.closeExposure(40, -40);
     rm.setEquity(960);
-    const d = rm.evaluate(1, 'simulation');
+    const d = rm.evaluate(1, 'deriv_demo');
     expect(d.halt).toBe(true);
     expect(d.haltReason).toBe('recovery_drawdown');
   });
@@ -262,16 +262,16 @@ describe('take-profit halt (maxSessionProfit)', () => {
   it('is disabled when set to 0', () => {
     const r = new RiskManager(enabled({ maxSessionProfit: 0 }), { ...DEFAULT_RECOVERY }, 1000);
     settle(r, 500);
-    expect(r.evaluate(1, 'simulation').allowed).toBe(true);
+    expect(r.evaluate(1, 'deriv_demo').allowed).toBe(true);
   });
 
   it('halts once cumulative session profit reaches the target', () => {
     const r = new RiskManager(enabled({ maxSessionProfit: 20 }), { ...DEFAULT_RECOVERY }, 1000);
-    expect(r.evaluate(1, 'simulation').allowed).toBe(true);
+    expect(r.evaluate(1, 'deriv_demo').allowed).toBe(true);
     settle(r, 12);
-    expect(r.evaluate(1, 'simulation').allowed).toBe(true);
+    expect(r.evaluate(1, 'deriv_demo').allowed).toBe(true);
     settle(r, 9);
-    const d = r.evaluate(1, 'simulation');
+    const d = r.evaluate(1, 'deriv_demo');
     expect(d.allowed).toBe(false);
     expect(d.halt).toBe(true);
     expect(d.haltReason).toBe('session_target');
@@ -281,7 +281,7 @@ describe('take-profit halt (maxSessionProfit)', () => {
   it('surfaces the halt in the snapshot so the UI can explain why trading stopped', () => {
     const r = new RiskManager(enabled({ maxSessionProfit: 5 }), { ...DEFAULT_RECOVERY }, 1000);
     settle(r, 6);
-    r.evaluate(1, 'simulation');
+    r.evaluate(1, 'deriv_demo');
     const snap = r.getSnapshot();
     expect(snap.halted).toBe(true);
     expect(snap.haltReason).toBe('session_target');
@@ -291,12 +291,12 @@ describe('take-profit halt (maxSessionProfit)', () => {
   it('clears the halt flag when the session counters are reset', () => {
     const r = new RiskManager(enabled({ maxSessionProfit: 5 }), { ...DEFAULT_RECOVERY }, 1000);
     settle(r, 6);
-    r.evaluate(1, 'simulation');
+    r.evaluate(1, 'deriv_demo');
     expect(r.getSnapshot().halted).toBe(true);
     r.resetSession();
     const snap = r.getSnapshot();
     expect(snap.halted).toBe(false);
     expect(snap.haltReason).toBeUndefined();
-    expect(r.evaluate(1, 'simulation').allowed).toBe(true);
+    expect(r.evaluate(1, 'deriv_demo').allowed).toBe(true);
   });
 });

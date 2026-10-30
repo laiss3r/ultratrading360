@@ -10,8 +10,6 @@ import { theoreticalDigitProbability } from '@/lib/deriv/digits';
 import { SOURCE_LABEL } from '@/lib/format';
 import { cn } from '@/lib/cn';
 import type { DigitContractType } from '@/lib/deriv/contracts';
-import { SIMULATOR_CATALOGUE } from '@/lib/engine/rng';
-import type { ActiveSymbol } from '@/lib/deriv/types';
 
 const CONTRACTS: { value: DigitContractType; label: string; barrier?: number }[] = [
   { value: 'DIGITODD', label: 'Odd' },
@@ -35,32 +33,10 @@ const CONTRACTS: { value: DigitContractType; label: string; barrier?: number }[]
  * spends money without the bot's risk gating behind it would undermine the whole
  * point of the risk manager.
  */
-/**
- * The market list, falling back to the simulator's own catalogue when nothing live
- * is connected. Shaped as ActiveSymbol so the browser, search and grouping below do
- * not need a second code path; `exchange_is_open: 1` is true for these because the
- * simulator is always able to produce them, unlike a real exchange that closes.
- */
-function effectiveSymbols(symbols: ActiveSymbol[]): { list: ActiveSymbol[]; synthetic: boolean } {
-  if (symbols.length > 0) return { list: symbols, synthetic: false };
-  return {
-    list: SIMULATOR_CATALOGUE.map((c) => ({
-      underlying_symbol: c.symbol,
-      underlying_symbol_name: c.name,
-      market: 'synthetic_indices',
-      submarket: 'Offline simulator',
-      pip_size: c.pipSize,
-      exchange_is_open: 1 as const,
-      is_trading_suspended: 0 as const,
-    })),
-    synthetic: true,
-  };
-}
-
 export default function ChartPage() {
   const s = useApp();
   const [query, setQuery] = useState('');
-  const { list: allSymbols, synthetic } = useMemo(() => effectiveSymbols(s.symbols), [s.symbols]);
+  const allSymbols = s.symbols;
 
   const grouped = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -94,9 +70,9 @@ export default function ChartPage() {
   const rank = s.rankings.find((r) => r.symbol === s.activeSymbol);
 
   return (
-    <div className="flex h-full min-h-0">
+    <div className="flex h-full min-h-0 flex-col lg:flex-row">
       {/* -------------------------------------------------- market browser */}
-      <aside className="flex w-[260px] shrink-0 flex-col border-r border-line bg-main-1">
+      <aside className="flex max-h-64 w-full shrink-0 flex-col border-b border-line bg-main-1 lg:max-h-none lg:w-[260px] lg:border-r lg:border-b-0">
         <div className="border-b border-line p-2.5">
           <label className="relative block">
             <Search size={13} className="pointer-events-none absolute top-1/2 left-2 -translate-y-1/2 text-less-prominent" />
@@ -112,7 +88,6 @@ export default function ChartPage() {
           <div className="mt-2 flex items-center justify-between">
             <span className="text-xxs text-less-prominent">
               {allSymbols.length} markets · {allSymbols.filter((x) => x.exchange_is_open === 1).length} open
-              {synthetic && ' (simulator)'}
             </span>
             <button type="button" className="text-xxs text-coral hover:underline" onClick={() => void s.rankMarkets()}>
               Rank
@@ -121,13 +96,18 @@ export default function ChartPage() {
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
-          {synthetic && (
-            <p className="border-b border-line p-2.5 text-xxs leading-relaxed text-less-prominent">
-              Offline simulator catalogue. These are the ten synthetic indices the simulator can genuinely produce, at
-              each one&apos;s real precision. Connect a Deriv account to browse the full live market list.
-            </p>
-          )}
-          {grouped.length === 0 ? (
+          {allSymbols.length === 0 ? (
+            <div className="flex flex-col gap-2 p-3">
+              <p className="text-xs leading-relaxed text-less-prominent">
+                No market list yet. It loads from Deriv&apos;s public socket, which needs no account and no token — the
+                connection is currently <strong className="text-general">{s.connectionStatus}</strong>
+                {s.marketError ? ` (${s.marketError})` : ''}.
+              </p>
+              <Button size="sm" variant="secondary" onClick={() => void s.applyMode(s.settings.mode, false)}>
+                Retry connection
+              </Button>
+            </div>
+          ) : grouped.length === 0 ? (
             <p className="p-3 text-xs text-less-prominent">Nothing matches &ldquo;{query}&rdquo;.</p>
           ) : (
             grouped.map(([sub, list]) => (

@@ -11,7 +11,7 @@ import { riskOfRuin, kellyFraction } from '@/lib/stats/ev';
  * Risk page — the single place where the enforced limits are configured.
  *
  * These are not advisory UI hints. RiskManager.evaluate() runs before every order and refuses or
- * clamps based on exactly these numbers, on both the simulation and live paths.
+ * clamps based on exactly these numbers, on every connected account.
  */
 export default function RiskPage() {
   const s = useApp();
@@ -34,7 +34,7 @@ export default function RiskPage() {
         <span className="flex items-start gap-2">
           <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
           <span>
-            Every limit below is enforced by the risk manager <strong>before</strong> an order is placed, in simulation and live alike. The
+            Every limit below is enforced by the risk manager <strong>before</strong> an order is placed, on demo and real accounts alike. The
             manager also <strong>clamps</strong> stakes rather than merely warning: a recovery multiplier can never push a stake above{' '}
             <code className="num">maxStake</code>. Stopped bots really stop, and a halted session cannot be resumed without an explicit reset
             here.
@@ -77,7 +77,7 @@ export default function RiskPage() {
               hint={
                 L.tradingEnabled
                   ? 'The risk manager will evaluate and place orders within the limits below.'
-                  : 'Kill switch is ON. No order can be placed in any mode, including simulation.'
+                  : 'Kill switch is ON. No order can be placed on any connected account.'
               }
             />
             <Toggle
@@ -115,7 +115,7 @@ export default function RiskPage() {
                   : 'Connect a real Deriv account first.'
               }
             />
-            {!L.tradingEnabled && s.settings.mode === 'simulation' && (
+            {false && (
               <Banner tone="info">
                 You are in SIM mode. Enabling trading here is still required to run a bot, but simulated orders are settled locally by the
                 seeded engine and are <strong>never</strong> sent to Deriv.
@@ -181,7 +181,7 @@ export default function RiskPage() {
               <strong className="font-bold">Read this before enabling recovery.</strong> A martingale does not change the expected value of
               a negative-EV contract; it changes the <em>distribution</em> of outcomes, trading many small wins for occasional large losses.
               With a multiplier of {R.multiplier} and a step limit of {R.stepLimit}, the worst-case stake sequence from{' '}
-              {s.settings.simulationStartingBalance > 0 ? money(L.minStake, '') : 'the minimum stake'} peaks at{' '}
+              {money(L.minStake, '')} peaks at{' '}
               <strong className="num">
                 {money(Math.min(L.maxStake, R.maxStake, L.minStake * Math.pow(R.multiplier, R.stepLimit)), '')}
               </strong>{' '}
@@ -210,24 +210,6 @@ export default function RiskPage() {
             >
               <Trash2 className="h-3.5 w-3.5" /> Clear trade history
             </Button>
-            <Field label="Simulation starting balance">
-              <input
-                type="number"
-                min={10}
-                step={100}
-                value={s.settings.simulationStartingBalance}
-                onChange={(e) => void s.setSettings({ simulationStartingBalance: Number(e.target.value) })}
-                className="num"
-              />
-            </Field>
-            <Field label="Simulation seed" hint="Identical seed + identical strategy = identical trade sequence. This is what makes SIM results reproducible.">
-              <input
-                type="text"
-                value={s.settings.simulationSeed}
-                onChange={(e) => void s.setSettings({ simulationSeed: e.target.value })}
-                className="num"
-              />
-            </Field>
             <Link href="/history">
               <Button variant="ghost" className="w-full">View full trade history</Button>
             </Link>

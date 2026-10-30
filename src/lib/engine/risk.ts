@@ -1,8 +1,10 @@
+import type { AccountMode } from '../deriv/types';
+
 /**
  * Centralised risk manager.
  *
  * This is the ONLY authority that can approve a trade. It is consulted before every order,
- * in simulation AND on a live account, and its decision cannot be overridden by a strategy,
+ * on every connected account, and its decision cannot be overridden by a strategy,
  * by recovery mode, or by the UI. Recovery mode is deliberately implemented as a *stake
  * suggestion* that is then clamped by the risk manager — it can never raise a limit.
  */
@@ -178,7 +180,7 @@ export class RiskManager {
    * The gate. Returns the decision AND the stake to actually use.
    * `halt: true` means the session must stop submitting orders entirely.
    */
-  evaluate(requestedStake: number, mode: 'simulation' | 'deriv_demo' | 'deriv_real', now = new Date()): RiskDecision {
+  evaluate(requestedStake: number, mode: AccountMode, now = new Date()): RiskDecision {
     this.rollDay(now);
     const reasons: string[] = [];
     const L = this.limits;

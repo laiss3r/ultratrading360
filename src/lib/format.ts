@@ -39,13 +39,11 @@ export function ago(ms: number): string {
 }
 
 export const MODE_LABEL: Record<string, string> = {
-  simulation: 'Simulation',
   deriv_demo: 'Deriv Demo',
   deriv_real: 'Deriv Real',
 };
 
 export const SOURCE_LABEL: Record<string, string> = {
-  simulation: 'SIMULATED DATA',
   deriv_live: 'DERIV LIVE',
   deriv_history: 'DERIV HISTORY',
   mixed: 'MIXED SOURCES',

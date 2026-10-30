@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { AlertTriangle, BarChart3, Blocks, CircleSlash, Copy, Pause, Play, Square, Trash2, Upload, Zap } from 'lucide-react';
 import { Badge, Banner, Button, Card, Empty, Stat } from '@/components/ui';
 import { DigitHistogram, DigitStrip, EquityCurve, TickChart, type DigitBin } from '@/components/charts';
@@ -36,11 +36,11 @@ export default function DashboardPage() {
     }));
   }, [digits]);
 
+  const [runError, setRunError] = useState<string | null>(null);
   const chi = useMemo(() => (digits.length >= 50 ? chiSquareUniformity(digits) : null), [digits]);
-  const live = trades.filter((t) => t.source === 'deriv_live');
-  const sim = trades.filter((t) => t.source === 'simulation');
-  const feed = s.dataSource === 'deriv_live' ? 'deriv_live' : 'simulation';
-  const feedTrades = trades.filter((t) => t.source === feed);
+  const demoCount = trades.filter((t) => t.mode === 'deriv_demo').length;
+  const realCount = trades.filter((t) => t.mode === 'deriv_real').length;
+  const feedTrades = trades.filter((t) => t.mode === settings.mode);
   const feedSettled = feedTrades.filter((t) => !t.error);
   const feedStake = feedSettled.reduce((a, t) => a + t.stake, 0);
   const feedPayout = feedSettled.reduce((a, t) => a + t.payout, 0);
@@ -53,13 +53,12 @@ export default function DashboardPage() {
           <span className="flex items-center gap-2">
             <CircleSlash className="h-3.5 w-3.5 shrink-0" />
             <span>
-              <strong>Trading is disabled.</strong> This is the safe default — no order can be placed until you turn it on.
-              {settings.mode === 'simulation' ? ' Simulation places no real orders either way.' : ''}
+              <strong>Trading is disabled.</strong> This is the safe default — no order can be placed on your Deriv account until you turn it on.
             </span>
           </span>
           <span className="flex items-center gap-2">
             <Button size="sm" variant="primary" onClick={() => void s.setSettings({ limits: { ...settings.limits, tradingEnabled: true } })}>
-              Enable {settings.mode === 'simulation' ? 'simulation' : 'live'} trading
+              Enable trading
             </Button>
             <Link href="/risk">
               <Button size="sm" variant="ghost">
@@ -70,10 +69,12 @@ export default function DashboardPage() {
         </Banner>
       )}
 
-      {settings.mode !== 'simulation' && !s.session && (
+      {runError && <Banner tone="danger">{runError}</Banner>}
+
+      {!s.session && (
         <Banner tone="warn">
-          <strong>{MODE_LABEL[settings.mode]} selected but no account is connected.</strong> Market data streams live from
-          Deriv without credentials; placing orders requires you to{' '}
+          <strong>No Deriv account connected.</strong> Market data streams live from Deriv without credentials; placing
+          orders requires you to{' '}
           <Link href="/connect" className="text-coral underline">
             connect an account
           </Link>
@@ -225,7 +226,12 @@ export default function DashboardPage() {
                         onClick={async () => {
                           s.setActiveStrategy(st.id);
                           const r = await s.runStrategy(st.id);
-                          if (!r.ok) s.pushLog('warn', r.message);
+                          if (!r.ok) {
+                            s.pushLog('warn', r.message);
+                            setRunError(r.message);
+                          } else {
+                            setRunError(null);
+                          }
                         }}
                         aria-label={`Run ${st.name}`}
                         title={botState === 'running' ? 'Another bot is running' : `Run "${st.name}"`}
@@ -267,10 +273,10 @@ export default function DashboardPage() {
       {/* ------------------------------------------------------- statistics */}
       <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 xl:grid-cols-6">
         <Stat
-          label={`${MODE_LABEL[settings.mode]} balance`}
-          value={money(metrics.endingBalance, settings.mode === 'simulation' ? 'SIM' : (s.session?.currency ?? 'USD'))}
-          tone={metrics.netProfit >= 0 ? 'profit' : 'loss'}
-          hint={`start ${metrics.startingBalance.toFixed(2)}`}
+          label="Account balance"
+          value={s.session ? money(metrics.endingBalance, s.session.currency) : 'Not connected'}
+          tone={s.session ? (metrics.netProfit >= 0 ? 'profit' : 'loss') : 'muted'}
+          hint={s.session ? `${s.session.loginid} · Deriv reports ${money(s.session.balance, s.session.currency)}` : 'connect to trade'}
         />
         <Stat label="Net P/L" value={signed(metrics.netProfit)} tone={metrics.netProfit >= 0 ? 'profit' : 'loss'} hint={pct(metrics.returnPct)} />
         <Stat
@@ -291,13 +297,13 @@ export default function DashboardPage() {
           tone="warn"
           hint={`${pct(metrics.maxDrawdownPct, 1)} from peak · ${metrics.maxConsecutiveLosses} consec. losses`}
         />
-        <Stat label="Trades" value={metrics.tradeCount} hint={`sim ${sim.length} · live ${live.length} · errors ${metrics.errorCount}`} />
+        <Stat label="Trades" value={metrics.tradeCount} hint={`demo ${demoCount} · real ${realCount} · errors ${metrics.errorCount}`} />
       </div>
 
       <Banner tone="info">
-        Statistics above cover the <strong>{SOURCE_LABEL[feed]}</strong> feed only — {feedSettled.length} settled contract
-        {feedSettled.length === 1 ? '' : 's'}, {feedStake.toFixed(2)} staked, {feedPayout.toFixed(2)} paid out. Simulation
-        and live results are never summed into one headline figure.
+        Statistics above cover your <strong>{MODE_LABEL[settings.mode]}</strong> account only — {feedSettled.length} settled
+        contract{feedSettled.length === 1 ? '' : 's'}, {feedStake.toFixed(2)} staked, {feedPayout.toFixed(2)} paid out. Demo
+        and real results are never summed into one headline figure.
       </Banner>
 
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
@@ -349,7 +355,7 @@ export default function DashboardPage() {
 
       <Card
         title="Equity curve"
-        subtitle={`${SOURCE_LABEL[feed]} contracts only, from a starting balance of ${metrics.startingBalance.toFixed(2)}.`}
+        subtitle={`${MODE_LABEL[settings.mode]} contracts only, from a starting balance of ${metrics.startingBalance.toFixed(2)}.`}
         right={
           <Link href="/history">
             <Button size="sm" variant="ghost">

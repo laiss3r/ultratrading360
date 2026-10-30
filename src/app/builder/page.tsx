@@ -9,7 +9,6 @@ import { createStrategy, newStrategyId, validateStrategy, type Strategy } from '
 import { evaluateGroup, type ConditionGroup, type ConditionKind } from '@/lib/engine/conditions';
 import type { ContractType } from '@/lib/deriv/contracts';
 import { PROGRESSIONS, PROGRESSION_ORDER, worstCaseStake } from '@/lib/engine/progressions';
-import { SIMULATOR_CATALOGUE } from '@/lib/engine/rng';
 
 const DIGIT_CONTRACTS: { value: ContractType; label: string; barrier: 'none' | 'required' }[] = [
   { value: 'DIGITODD', label: 'Odd', barrier: 'none' },
@@ -242,7 +241,7 @@ export default function BuilderPage() {
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         {/* ------------------------------------------------------ toolbox */}
         <Toolbox
           onAdd={(kind) => {
@@ -308,13 +307,12 @@ export default function BuilderPage() {
                         ))}
                       </select>
                     ) : (
-                      <select value={draft.market} onChange={(e) => patch({ market: e.target.value })}>
-                        {Array.from(new Set([draft.market, ...SIMULATOR_CATALOGUE.map((c) => c.symbol)])).map((m) => (
-                          <option key={m} value={m}>
-                            {SIMULATOR_CATALOGUE.find((c) => c.symbol === m)?.name ?? m} ({m})
-                          </option>
-                        ))}
-                      </select>
+                      <input
+                        type="text"
+                        value={draft.market}
+                        onChange={(e) => patch({ market: e.target.value })}
+                        title="The market list loads from Deriv once the connection is open"
+                      />
                     )}
                   </In>
                   <In label="Trade type">

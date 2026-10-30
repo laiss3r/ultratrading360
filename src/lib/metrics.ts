@@ -152,11 +152,8 @@ export function breakdown(trades: TradeRecord[]) {
  * Which provenance dominates a set of trades. Used to label a table so simulated and real
  * results are never silently aggregated together.
  */
-export function dominantSource(trades: TradeRecord[]): 'simulation' | 'deriv_live' | 'mixed' | 'none' {
-  const s = new Set(trades.map((t) => t.source));
-  if (s.size === 0) return 'none';
-  if (s.size === 1) return [...s][0];
-  return 'mixed';
+export function dominantSource(trades: TradeRecord[]): 'deriv_live' | 'none' {
+  return trades.length === 0 ? 'none' : 'deriv_live';
 }
 
 function round2(n: number): number {

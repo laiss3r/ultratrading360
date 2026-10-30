@@ -3,7 +3,7 @@
 import { create } from 'zustand';
 import type { AccountMode, ActiveSymbol, AuthSession } from '@/lib/deriv/types';
 import { DERIV_APP_ID } from '@/lib/deriv/config';
-import { DerivProvider, SimulationProvider, type MarketProvider, type Quote } from '@/lib/engine/provider';
+import { DerivProvider, type MarketProvider, type Quote } from '@/lib/engine/provider';
 import { RiskManager, type RiskSnapshot } from '@/lib/engine/risk';
 import { TradingBot, type BotState, type TradeRecord } from '@/lib/engine/bot';
 import { createStrategy, validateStrategy, type Strategy } from '@/lib/engine/strategies';
@@ -66,7 +66,7 @@ interface State {
   quotes: Quote[];
   digits: number[];
   pipSize: number;
-  dataSource: 'none' | 'simulation' | 'deriv_live';
+  dataSource: 'none' | 'deriv_live';
   marketLoading: boolean;
   marketError: string | null;
 
@@ -149,8 +149,8 @@ export const useApp = create<State & Actions>()((set, get) => ({
   botState: 'idle',
   botDetail: '',
   trades: [],
-  metrics: computeMetrics([], DEFAULT_SETTINGS.simulationStartingBalance),
-  risk: new RiskManager(DEFAULT_SETTINGS.limits, DEFAULT_SETTINGS.recovery, DEFAULT_SETTINGS.simulationStartingBalance),
+  metrics: computeMetrics([], 0),
+  risk: new RiskManager(DEFAULT_SETTINGS.limits, DEFAULT_SETTINGS.recovery, 0),
   riskSnapshot: new RiskManager().getSnapshot(),
   log: [],
   busy: null,
@@ -167,12 +167,12 @@ export const useApp = create<State & Actions>()((set, get) => ({
     const settings = await loadSettings();
     const strategies = await listStrategies();
     const trades = await listTrades();
-    const risk = new RiskManager(settings.limits, settings.recovery, settings.simulationStartingBalance);
+    const risk = new RiskManager(settings.limits, settings.recovery, 0);
     set({
       settings,
       strategies: strategies.length ? strategies : [createStrategy({ name: 'Starter — odd digit' })],
       trades,
-      metrics: computeMetrics(trades, settings.simulationStartingBalance),
+      metrics: computeMetrics(trades, 0),
       risk,
       riskSnapshot: risk.getSnapshot(),
       hydrated: true,
@@ -190,7 +190,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
       const j = await r.json();
       set({ appId: j.appId, oauthConfigured: !!j.oauth?.configured, redirectUri: j.oauth?.redirectUri ?? '' });
     } catch {
-      /* config is advisory; the app still runs in simulation */
+      /* config is advisory; market data works without any server secret */
     }
   },
 
@@ -236,8 +236,10 @@ export const useApp = create<State & Actions>()((set, get) => ({
       const r = await fetch('/api/deriv/session?refresh=1', { cache: 'no-store' });
       const j = await r.json();
       if (j.authenticated && j.session) {
+        const had = get().session;
         set({ session: j.session as AuthSession });
         if (notify) get().pushLog('ok', `Session active: ${j.session.loginid} (${j.session.currency})`);
+        if (!had || had.loginid !== j.session.loginid) get().rebaseToAccount();
       } else {
         set({ session: null });
         if (notify && j.reason) get().pushLog('warn', `Session not active: ${j.reason}`);
@@ -268,6 +270,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
       }
       set({ session: j.session as AuthSession, accounts: (j.accounts ?? []) as AccountSummary[] });
       get().pushLog('ok', `Connected with API token as ${j.session.loginid}.`);
+      get().rebaseToAccount();
       // Default to the DEMO socket after connecting. Selecting a real account is a separate,
       // explicitly gated action -- we never silently start on real money.
       await get().applyMode('deriv_demo', false);
@@ -312,7 +315,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
     }
     set({ session: null, accounts: [] });
     get().pushLog('warn', 'Disconnected. The local session cookie was cleared; revoke the token at Deriv if you want it dead server-side.');
-    await get().applyMode('simulation', false);
+    await get().applyMode('deriv_demo', false);
   },
 
   /** Switch the active account (demo vs real). Real requires acknowledgement. */
@@ -326,6 +329,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
       };
     }
     await get().applyMode(acct.isVirtual ? 'deriv_demo' : 'deriv_real', false);
+    get().rebaseToAccount();
     return { ok: true, message: `Switched to ${loginid}` };
   },
 
@@ -337,22 +341,6 @@ export const useApp = create<State & Actions>()((set, get) => ({
     cur.stopBot(`mode changed to ${mode}`);
     cur.provider?.disconnect();
 
-    if (mode === 'simulation') {
-      const provider = new SimulationProvider({ seed: cur.settings.simulationSeed });
-      set({ provider, dataSource: 'simulation', connectionStatus: 'connecting', marketError: null });
-      try {
-        await provider.connect();
-        set({ connectionStatus: 'open' });
-        await get().loadMarket(initial);
-        get().pushLog('ok', `Simulation engine ready (seed "${cur.settings.simulationSeed}"). No Deriv account required.`);
-      } catch (e) {
-        set({ connectionStatus: 'error', marketError: (e as Error).message });
-        get().pushLog('error', `Simulation failed to start: ${(e as Error).message}`);
-      }
-      return;
-    }
-
-    // Deriv modes need an authenticated socket, minted server-side.
     set({ dataSource: 'deriv_live', connectionStatus: 'connecting', marketError: null });
 
     // Public market data works with NO credential, so load that first: the charts are useful
@@ -365,11 +353,10 @@ export const useApp = create<State & Actions>()((set, get) => ({
       await get().loadMarket(initial);
       get().pushLog('ok', `Connected to Deriv public market data (${mode}).`);
     } catch (e) {
+      // No fallback: a Deriv tool without Deriv shows an error, not invented prices.
       set({ connectionStatus: 'error', marketError: (e as Error).message });
       get().pushLog('error', `Deriv market-data connection failed: ${(e as Error).message}`);
-      get().pushLog('warn', 'Falling back to simulation so the workspace stays usable.');
-      await get().setSettings({ mode: 'simulation' });
-      await get().applyMode('simulation', initial);
+      get().pushLog('warn', 'Charts and statistics stay empty until the connection to Deriv succeeds.');
       return;
     }
 
@@ -572,8 +559,11 @@ export const useApp = create<State & Actions>()((set, get) => ({
     }
 
     const mode = get().settings.mode;
-    if (mode !== 'simulation' && !get().session) {
-      return { ok: false, message: `${mode} requires a connected Deriv account.` };
+    if (!get().session) {
+      return {
+        ok: false,
+        message: 'No Deriv account is connected. Connect a demo or real account before running a bot — this tool trades only on Deriv.',
+      };
     }
     if (!get().settings.limits.tradingEnabled) {
       return { ok: false, message: 'Trading is disabled. Enable it in Risk settings — the bot refuses to run otherwise.' };
@@ -585,8 +575,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
       return { ok: false, message: 'A bot is already running. Stop it first — only one bot runs at a time to prevent duplicate orders.' };
     }
 
-    const startingBalance =
-      mode === 'simulation' ? get().settings.simulationStartingBalance : (get().session?.balance ?? 0);
+    const startingBalance = get().session?.balance ?? 0;
     const risk = new RiskManager(get().settings.limits, get().settings.recovery, startingBalance);
 
     const bot = new TradingBot(s, provider, risk, {
@@ -605,7 +594,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
           t.error ? 'error' : t.won ? 'ok' : 'warn',
           t.error
             ? `TRADE ERROR ${t.symbol}: ${t.error}`
-            : `${t.won ? 'WIN ' : 'LOSS'} ${t.symbol} ${t.contractType} stake ${t.stake.toFixed(2)} -> ${t.profit >= 0 ? '+' : ''}${t.profit.toFixed(2)} ${t.source === 'simulation' ? '[SIMULATED]' : '[LIVE]'}`,
+            : `${t.won ? 'WIN ' : 'LOSS'} ${t.symbol} ${t.contractType} stake ${t.stake.toFixed(2)} -> ${t.profit >= 0 ? '+' : ''}${t.profit.toFixed(2)} [${mode === 'deriv_real' ? 'REAL' : 'DEMO'}]`,
         );
       },
       onError: (e) => get().pushLog('error', e.message),
@@ -646,10 +635,22 @@ export const useApp = create<State & Actions>()((set, get) => ({
     await clearTrades();
     // Resetting the stats also resets the run counter, exactly as Deriv Bot's
     // Reset button does — "No. of runs" is defined as runs since the last clear.
-    set((s) => ({ trades: [], botRuns: 0, metrics: computeMetrics([], s.settings.simulationStartingBalance) }));
-    get().risk.resetAll(get().settings.simulationStartingBalance);
+    const base = get().session?.balance ?? 0;
+    set(() => ({ trades: [], botRuns: 0, metrics: computeMetrics([], base) }));
+    get().risk.resetAll(base);
     set({ riskSnapshot: get().risk.getSnapshot() });
     get().pushLog('warn', 'Trade history cleared.');
+  },
+
+  /**
+   * Point the risk manager and the equity statistics at the connected account's balance.
+   * Drawdown and session-loss limits are percentages of real equity, so they must be
+   * measured from the account Deriv reports, never from a stored or invented figure.
+   */
+  rebaseToAccount() {
+    const base = get().session?.balance ?? 0;
+    get().risk.resetAll(base);
+    set({ metrics: computeMetrics(get().trades, base), riskSnapshot: get().risk.getSnapshot() });
   },
 
   resetRisk() {
@@ -685,6 +686,7 @@ interface Actions {
   resumeBot: () => void;
   stopBot: (reason?: string) => void;
   clearTrades: () => Promise<void>;
+  rebaseToAccount: () => void;
   resetRisk: () => void;
   setRunPanelOpen: (open: boolean) => void;
   setRunPanelTab: (tab: RunPanelTab) => void;

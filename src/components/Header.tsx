@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BarChart3, Blocks, LayoutDashboard, LineChart, Zap } from 'lucide-react';
+import { BarChart3, Blocks, LayoutDashboard, LineChart, PanelRight, Zap } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { useApp } from '@/state/store';
 import { AccountSwitcher } from './AccountSwitcher';
@@ -23,6 +23,7 @@ const TABS = [
 export function AppHeader() {
   const pathname = usePathname();
   const openQuickStrategy = useApp((s) => s.openQuickStrategy);
+  const openRunPanel = useApp((s) => s.setRunPanelOpen);
 
   return (
     <header className="dt-header">
@@ -41,7 +42,25 @@ export function AppHeader() {
         })}
       </nav>
 
-      <div className="ml-auto flex items-center gap-3">
+      <div className="ml-auto flex items-center gap-2 md:gap-3">
+        <button
+          type="button"
+          onClick={openQuickStrategy}
+          className="inline-flex items-center justify-center rounded bg-coral p-2 text-white transition-colors hover:bg-coral-hover md:hidden"
+          aria-label="Quick strategy"
+          title="Launch a strategy from a preset progression — Martingale, D'Alembert, Oscar's Grind, 1-3-2-6"
+        >
+          <Zap size={16} />
+        </button>
+        <button
+          type="button"
+          onClick={() => openRunPanel(true)}
+          className="inline-flex items-center justify-center rounded border border-line p-2 text-general transition-colors hover:bg-state-hover lg:hidden"
+          aria-label="Open run panel"
+          title="Run panel: status, transactions and journal"
+        >
+          <PanelRight size={16} />
+        </button>
         <button
           type="button"
           onClick={openQuickStrategy}
@@ -127,7 +146,7 @@ function PriceReadout() {
           </span>
         </span>
       )}
-      <span className="text-xxs text-less-prominent">{dataSource === 'deriv_live' ? 'live' : 'simulated'}</span>
+      <span className="text-xxs text-less-prominent">{dataSource === 'deriv_live' ? 'live' : 'no feed'}</span>
     </div>
   );
 }

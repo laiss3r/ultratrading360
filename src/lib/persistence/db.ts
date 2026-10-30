@@ -30,8 +30,6 @@ const PREFIX = {
 
 export interface AppSettings {
   mode: AccountMode;
-  simulationSeed: string;
-  simulationStartingBalance: number;
   limits: RiskLimits;
   recovery: RecoveryConfig;
   /** Explicit acknowledgement that real money is at risk. Never defaults to true. */
@@ -52,9 +50,7 @@ export interface AppSettings {
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  mode: 'simulation',
-  simulationSeed: 'ultratrading360-default',
-  simulationStartingBalance: 10000,
+  mode: 'deriv_demo',
   limits: {
     maxStake: 10,
     minStake: 0.35,
@@ -124,7 +120,12 @@ export async function clearTrades(): Promise<void> {
 export async function loadSettings(): Promise<AppSettings> {
   if (!(await available())) return { ...DEFAULT_SETTINGS };
   const stored = await get<Partial<AppSettings>>(PREFIX.settings + 'app');
-  return { ...DEFAULT_SETTINGS, ...(stored ?? {}) };
+  const merged = { ...DEFAULT_SETTINGS, ...(stored ?? {}) };
+  // Workspaces saved before simulation mode was removed may still carry it. There is no
+  // equivalent to migrate to except the demo account, which is the safe default: it can
+  // trade, but never with real money.
+  if ((merged.mode as string) === 'simulation') merged.mode = 'deriv_demo';
+  return merged;
 }
 
 export async function saveSettings(s: AppSettings): Promise<void> {

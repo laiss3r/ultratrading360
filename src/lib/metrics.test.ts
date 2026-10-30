@@ -5,7 +5,7 @@ import type { TradeRecord } from './engine/bot';
 const tr = (o: Partial<TradeRecord>): TradeRecord => ({
   id: 'x', idempotencyKey: 'k', strategyId: 's', strategyName: 'S', strategyVersion: 1,
   symbol: 'R_100', contractType: 'DIGITODD', stake: 1, payout: 1.96, profit: 0.96, won: true,
-  openedAt: 0, closedAt: 0, mode: 'simulation', source: 'simulation',
+  openedAt: 0, closedAt: 0, mode: 'deriv_demo', source: 'deriv_live',
   balanceBefore: 0, balanceAfter: 0, riskReasons: [], gateReasons: [], ...o,
 });
 
@@ -110,15 +110,16 @@ describe('drawdown', () => {
 });
 
 describe('provenance labelling', () => {
-  it('identifies a single source', () => {
-    expect(dominantSource([tr({ source: 'simulation' })])).toBe('simulation');
-    expect(dominantSource([tr({ source: 'deriv_live' })])).toBe('deriv_live');
-  });
-  it('flags MIXED rather than silently aggregating', () => {
-    expect(dominantSource([tr({ source: 'simulation' }), tr({ source: 'deriv_live' })])).toBe('mixed');
+  it('every executed contract is Deriv-executed', () => {
+    expect(dominantSource([tr({})])).toBe('deriv_live');
+    expect(dominantSource([tr({ mode: 'deriv_real' })])).toBe('deriv_live');
   });
   it('reports none for an empty set', () => {
     expect(dominantSource([])).toBe('none');
+  });
+  it('keeps the account mode on every record so the UI can separate demo from real', () => {
+    expect(tr({ mode: 'deriv_real' }).mode).toBe('deriv_real');
+    expect(tr({}).mode).toBe('deriv_demo');
   });
 });
 
@@ -138,8 +139,10 @@ describe('breakdown by market, strategy and contract type', () => {
     expect(b.byMarket.find((x) => x.name === 'R_100')!.metrics.settledCount).toBe(2);
   });
 
-  it('keeps simulated and real results in separate buckets by source', () => {
-    const trades = [tr({ symbol: 'R_100', source: 'simulation', profit: 5 }), tr({ symbol: 'R_100', source: 'deriv_live', profit: -5 })];
-    expect(breakdown(trades).byMarket[0].source).toBe('mixed');
+  it('labels every bucket as Deriv-executed and preserves the account mode of each record', () => {
+    const trades = [tr({ symbol: 'R_100', mode: 'deriv_demo', profit: 5 }), tr({ symbol: 'R_100', mode: 'deriv_real', profit: -5 })];
+    const bucket = breakdown(trades).byMarket[0];
+    expect(bucket.source).toBe('deriv_live');
+    expect(trades.map((t) => t.mode)).toEqual(['deriv_demo', 'deriv_real']);
   });
 });

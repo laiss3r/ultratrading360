@@ -1,4 +1,5 @@
 import type { MarketProvider, Quote, SettledContract } from './provider';
+import type { AccountMode } from '../deriv/types';
 import { evaluateGroup, type DigitWindow } from './conditions';
 import { RiskManager, type RiskDecision } from './risk';
 import type { Strategy } from './strategies';
@@ -27,9 +28,9 @@ export interface TradeRecord {
   exitDigit?: number;
   entryPrice?: number;
   exitPrice?: number;
-  mode: 'simulation' | 'deriv_demo' | 'deriv_real';
-  /** Provenance of the numbers, so simulated P/L is never mixed with real P/L. */
-  source: 'simulation' | 'deriv_live';
+  mode: AccountMode;
+  /** Provenance of the numbers: every contract here was executed through Deriv. */
+  source: 'deriv_live';
   balanceBefore: number;
   balanceAfter: number;
   riskReasons: string[];
@@ -277,7 +278,7 @@ export class TradingBot {
         entryPrice: settled.entryPrice,
         exitPrice: settled.exitPrice,
         mode,
-        source: settled.source,
+        source: 'deriv_live',
         balanceBefore,
         balanceAfter: this.balance,
         riskReasons: decision.reasons,
@@ -301,7 +302,7 @@ export class TradingBot {
         openedAt: now,
         closedAt: Date.now(),
         mode,
-        source: this.provider.source === 'simulation' ? 'simulation' : 'deriv_live',
+        source: 'deriv_live',
         balanceBefore,
         balanceAfter: this.balance,
         riskReasons: decision.reasons,

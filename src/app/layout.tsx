@@ -5,7 +5,7 @@ import { AppShell } from '@/components/AppShell';
 export const metadata: Metadata = {
   title: 'UltraTrading360 — Deriv Trading Automation',
   description:
-    'Strategy builder, statistical analysis and automated trading for the Deriv API, with a deterministic simulation engine and enforced risk limits.',
+    'A Deriv third-party trading tool: visual strategy builder, automated bots and statistical analysis running against live Deriv market data and your demo or real account, with enforced risk limits.',
   applicationName: 'UltraTrading360',
 };
 

@@ -120,9 +120,7 @@ function NetworkStatus() {
       ? { label: 'Connected', tone: 'text-profit', dot: 'bg-profit', title: 'Live Deriv WebSocket is streaming' }
       : dataSource === 'deriv_live' && connectionStatus === 'connecting'
         ? { label: 'Connecting', tone: 'text-orange', dot: 'bg-orange', title: 'Opening the Deriv WebSocket' }
-        : dataSource === 'simulation'
-          ? { label: 'Simulated feed', tone: 'text-blue', dot: 'bg-blue', title: 'Prices come from the deterministic simulator, not Deriv' }
-          : connectionStatus === 'error' || connectionStatus === 'closed'
+        : connectionStatus === 'error' || connectionStatus === 'closed'
             ? { label: 'Disconnected', tone: 'text-loss', dot: 'bg-loss', title: 'No market feed is connected' }
             : { label: 'Idle', tone: 'text-less-prominent', dot: 'bg-less-prominent', title: 'No market feed started yet' };
 

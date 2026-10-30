@@ -95,7 +95,7 @@ export function Button({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        'inline-flex items-center justify-center gap-1.5 rounded transition-colors duration-100',
+        'dt-btn inline-flex items-center justify-center gap-1.5 rounded transition-colors duration-100',
         'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-coral',
         size === 'sm' && 'px-2.5 py-1 text-xs',
         size === 'md' && 'px-4 py-1.5 text-xs',

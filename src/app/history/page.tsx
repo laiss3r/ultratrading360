@@ -5,35 +5,36 @@ import { Download, Trash2 } from 'lucide-react';
 import { Badge, Banner, Button, Card, Empty, Segmented, Stat } from '@/components/ui';
 import { EquityCurve } from '@/components/charts';
 import { useApp } from '@/state/store';
+import type { AccountMode } from '@/lib/deriv/types';
 import { computeMetrics } from '@/lib/metrics';
 import { clock, money, pct, signed } from '@/lib/format';
 
-type SourceFilter = 'all' | 'simulation' | 'deriv_live';
+type ModeFilter = 'all' | AccountMode;
 
 /**
  * Trade history.
  *
- * Aggregates are computed PER PROVENANCE. Simulated P/L and live P/L are never summed into a
- * single headline number, because doing so would let a good simulation run masquerade as real
- * performance.
+ * Aggregates are computed PER ACCOUNT. Demo P/L and real P/L are never summed into a single
+ * headline number, because doing so would let a good demo run masquerade as real performance.
  */
 export default function HistoryPage() {
   const s = useApp();
-  const [filter, setFilter] = useState<SourceFilter>('all');
+  const [filter, setFilter] = useState<ModeFilter>('all');
   const [strategyFilter, setStrategyFilter] = useState<string>('all');
 
   const rows = useMemo(() => {
     let r = s.trades;
-    if (filter !== 'all') r = r.filter((t) => t.source === filter);
+    if (filter !== 'all') r = r.filter((t) => t.mode === filter);
     if (strategyFilter !== 'all') r = r.filter((t) => t.strategyId === strategyFilter);
     return r;
   }, [s.trades, filter, strategyFilter]);
 
-  const sim = useMemo(() => s.trades.filter((t) => t.source === 'simulation'), [s.trades]);
-  const live = useMemo(() => s.trades.filter((t) => t.source === 'deriv_live'), [s.trades]);
-  const simM = useMemo(() => computeMetrics(sim, s.settings.simulationStartingBalance), [sim, s.settings.simulationStartingBalance]);
-  const liveM = useMemo(() => computeMetrics(live, s.session?.balance ?? 0), [live, s.session?.balance]);
-  const filtered = useMemo(() => computeMetrics(rows, simM.startingBalance), [rows, simM.startingBalance]);
+  const base = s.session?.balance ?? 0;
+  const demo = useMemo(() => s.trades.filter((t) => t.mode === 'deriv_demo'), [s.trades]);
+  const real = useMemo(() => s.trades.filter((t) => t.mode === 'deriv_real'), [s.trades]);
+  const demoM = useMemo(() => computeMetrics(demo, base), [demo, base]);
+  const realM = useMemo(() => computeMetrics(real, base), [real, base]);
+  const filtered = useMemo(() => computeMetrics(rows, base), [rows, base]);
 
   const byStrategy = useMemo(() => group(rows, (t) => `${t.strategyName} v${t.strategyVersion}`), [rows]);
   const byMarket = useMemo(() => group(rows, (t) => t.symbol), [rows]);
@@ -76,27 +77,30 @@ export default function HistoryPage() {
   return (
     <div className="mx-auto max-w-[1600px] space-y-3 p-4">
       <Banner tone="info">
-        <strong className="font-bold">Simulation and live results are kept separate.</strong> They are never summed into one headline
-        figure. Every trade row records its own <code className="num">source</code> and <code className="num">mode</code>, so a profitable
-        simulation can never be mistaken for profitable live trading.
+        <strong className="font-bold">Demo and real results are kept separate.</strong> They are never summed into one headline
+        figure. Every trade row records its own <code className="num">mode</code>, so a profitable demo run can never be mistaken for
+        profitable real-money trading.
       </Banner>
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <Card title="Simulation performance" subtitle="Settled locally by the seeded engine. No order was ever sent to Deriv." right={<Badge tone="brand">SIM</Badge>}>
-          <MetricGrid m={simM} />
+        <Card
+          title="Demo performance"
+          subtitle="Orders placed on your Deriv demo account through an authenticated socket."
+          right={<Badge tone={demo.length ? 'info' : 'neutral'}>{demo.length ? 'DEMO' : 'NO DEMO TRADES'}</Badge>}
+        >
+          {demo.length === 0 ? <Empty title="No demo trades recorded">Run a bot with a demo account connected.</Empty> : <MetricGrid m={demoM} />}
         </Card>
         <Card
-          title="Live performance"
-          subtitle="Executed through an authenticated Deriv socket against a real or demo account."
-          right={<Badge tone={live.length ? 'info' : 'neutral'}>{live.length ? 'LIVE' : 'NO LIVE TRADES'}</Badge>}
+          title="Real performance"
+          subtitle="Orders placed on your Deriv real account. Real money, real settlements."
+          right={<Badge tone={real.length ? 'loss' : 'neutral'}>{real.length ? 'REAL' : 'NO REAL TRADES'}</Badge>}
         >
-          {live.length === 0 ? (
-            <Empty title="No live trades recorded">
-              Connect a Deriv account and run a bot in DEMO or REAL mode. Nothing here is fabricated — if no live order settled, no live
-              performance is shown.
+          {real.length === 0 ? (
+            <Empty title="No real trades recorded">
+              Nothing here is fabricated — if no real order settled, no real performance is shown.
             </Empty>
           ) : (
-            <MetricGrid m={liveM} />
+            <MetricGrid m={realM} />
           )}
         </Card>
       </div>
@@ -111,8 +115,8 @@ export default function HistoryPage() {
               onChange={setFilter}
               options={[
                 { value: 'all', label: 'All' },
-                { value: 'simulation', label: 'SIM' },
-                { value: 'deriv_live', label: 'LIVE' },
+                { value: 'deriv_demo', label: 'DEMO' },
+                { value: 'deriv_real', label: 'REAL' },
               ]}
             />
             <select

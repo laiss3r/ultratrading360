@@ -15,7 +15,6 @@ import {
   worstCaseStake,
   type ProgressionKind,
 } from '@/lib/engine/progressions';
-import { SIMULATOR_CATALOGUE } from '@/lib/engine/rng';
 
 /** Deriv's own labels for the digit trade types, grouped as "Digits". */
 const TRADE_TYPES: { value: DigitContractType; label: string; needsBarrier: boolean }[] = [
@@ -47,7 +46,6 @@ export function QuickStrategy() {
   const session = useApp((s) => s.session);
   const settings = useApp((s) => s.settings);
   const mode = useApp((s) => s.settings.mode);
-  const dataSource = useApp((s) => s.dataSource);
   const saveStrategy = useApp((s) => s.saveStrategy);
   const setActiveStrategy = useApp((s) => s.setActiveStrategy);
   const runStrategy = useApp((s) => s.runStrategy);
@@ -90,8 +88,7 @@ export function QuickStrategy() {
         open: s.exchange_is_open === 1,
       }));
     }
-    // Offline: offer exactly what the simulator can produce, never more.
-    return SIMULATOR_CATALOGUE.map((c) => ({ value: c.symbol, label: `${c.name} (${c.symbol})`, open: true }));
+    return [];
   }, [rankings, symbols]);
 
   const launch = async () => {
@@ -159,7 +156,7 @@ export function QuickStrategy() {
           <Button variant="secondary" size="sm" onClick={close} disabled={busy}>
             Cancel
           </Button>
-          <Button variant="primary" size="sm" onClick={launch} disabled={busy}>
+          <Button variant="primary" size="sm" onClick={launch} disabled={busy || !session}>
             {busy ? 'Starting…' : 'Create and run'}
           </Button>
         </>
@@ -307,12 +304,16 @@ export function QuickStrategy() {
             </Field>
           </div>
 
-          <Banner tone={mode === 'simulation' ? 'info' : 'warn'}>
-            {mode === 'simulation'
-              ? 'This will run against the deterministic simulator. No order is sent to Deriv and no money moves.'
-              : `This will place ${mode === 'deriv_real' ? 'REAL-MONEY' : 'demo'} contracts on Deriv. Every order still passes the risk manager.`}
-            {dataSource === 'simulation' && ' Feed currently: simulated.'}
-          </Banner>
+          {!session ? (
+            <Banner tone="danger">
+              No Deriv account is connected, so nothing can be launched. Connect a demo or real account — market data
+              already streams without one, but orders need an account.
+            </Banner>
+          ) : (
+            <Banner tone={mode === 'deriv_real' ? 'warn' : 'info'}>
+              {`This will place ${mode === 'deriv_real' ? 'REAL-MONEY' : 'demo'} contracts on Deriv. Every order still passes the risk manager.`}
+            </Banner>
+          )}
 
           {message && !message.ok && <Banner tone="danger">{message.text}</Banner>}
         </div>

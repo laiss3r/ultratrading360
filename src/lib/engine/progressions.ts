@@ -6,7 +6,7 @@
  * vocabulary instead of inventing its own "recovery mode".
  *
  * Every function here is PURE over the outcome history. That is deliberate:
- *   - it is reproducible, so the simulation can be replayed from a seed and produce
+ *   - it is reproducible, so a backtest or a test can replay a history and produce
  *     identical stakes trade-for-trade;
  *   - it cannot drift from hidden mutable state after a pause/resume or a reload;
  *   - it is trivially testable against hand-computed sequences.

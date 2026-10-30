@@ -14,7 +14,7 @@ import type { AccountMode } from '@/lib/deriv/types';
  * every account on the session.
  *
  * This app has one concept Deriv's own platforms do not — a fully offline
- * SIMULATION feed alongside Deriv demo and Deriv real. The switcher keeps the
+ * Deriv demo and Deriv real. The switcher keeps the
  * two axes visibly separate: the feed selector chooses where prices and orders
  * go, the account list chooses which Deriv loginid is active. Real money is
  * offered only after it has been acknowledged in Risk settings.
@@ -91,7 +91,7 @@ export function AccountSwitcher() {
           <Wallet size={13} />
         </span>
         <span className="text-left leading-tight">
-          <span className="block text-xxs text-less-prominent">{session ? (session.isVirtual ? 'Demo' : 'Real') : 'Simulation'}</span>
+          <span className="block text-xxs text-less-prominent">{session ? (session.isVirtual ? 'Demo' : 'Real') : 'Not connected'}</span>
           <span className="num block text-xs font-bold text-prominent">{session ? loginid : 'SIM'}</span>
         </span>
         <span className="num hidden border-l border-line pl-2.5 text-xs font-bold text-prominent sm:block">{balance}</span>
@@ -108,7 +108,7 @@ export function AccountSwitcher() {
           <div className="border-b border-line p-3">
             <div className="dt-section-title mb-2">Market feed</div>
             <div className="flex flex-col gap-1">
-              {(['simulation', 'deriv_demo', 'deriv_real'] as const).map((m) => {
+              {(['deriv_demo', 'deriv_real'] as const).map((m) => {
                 const locked = m === 'deriv_real' && (!realAcknowledged || !session);
                 return (
                   <button
@@ -134,7 +134,7 @@ export function AccountSwitcher() {
               })}
             </div>
             <p className="mt-2 text-xxs leading-relaxed text-less-prominent">
-              Simulation never contacts Deriv. Results from each feed are kept separate and are never summed together.
+              Demo and real results are kept separate and are never summed together. Market data streams from Deriv&apos;s public socket even before you log in; placing orders needs a connected account.
             </p>
           </div>
 

@@ -113,7 +113,12 @@ export interface DerivMessage {
   [key: string]: unknown;
 }
 
-export type AccountMode = 'simulation' | 'deriv_demo' | 'deriv_real';
+/**
+ * There is no simulation mode. This is a Deriv third-party tool: market data comes from
+ * Deriv's public socket without credentials, and trading happens on a connected demo or
+ * real account. A fake feed would misrepresent what a strategy actually does.
+ */
+export type AccountMode = 'deriv_demo' | 'deriv_real';
 
 export interface AuthSession {
   kind: 'oauth' | 'pat';
