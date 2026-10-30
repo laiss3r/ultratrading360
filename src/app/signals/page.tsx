@@ -18,7 +18,7 @@ import { backtest } from '@/lib/stats/backtest';
 import { expectedValue, theoreticalEv } from '@/lib/stats/ev';
 import { meanInterval } from '@/lib/stats/ci';
 import { theoreticalDigitProbability } from '@/lib/deriv/digits';
-import type { ContractType, DigitContractType } from '@/lib/deriv/contracts';
+import type { DigitContractType } from '@/lib/deriv/contracts';
 import { pValue, pct, signed, SOURCE_LABEL } from '@/lib/format';
 
 type Tab = 'distribution' | 'dependence' | 'multiple' | 'backtest' | 'ev';
@@ -194,7 +194,7 @@ function DistributionTab({ digits }: { digits: number[] }) {
             </div>
             <p className="mt-2 text-[11px] leading-relaxed text-ink-3">
               The dashed gold line is the 10% expectation. Excursions of ±5 points around it are routine in a genuinely fair series at this
-              window size — this chart is why a single "hot digit" observation is not evidence of anything.
+              window size — this chart is why a single “hot digit” observation is not evidence of anything.
             </p>
           </>
         )}
@@ -356,7 +356,7 @@ function MultipleTab({ digits }: { digits: number[] }) {
           <Sigma className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>
             Running {items.length} tests at α={alpha} produces about <strong className="num">{efp.toFixed(2)}</strong> false positives by
-            chance alone, even on perfectly fair data. This is the multiple-comparisons problem, and it is the reason a "signal" found by
+            chance alone, even on perfectly fair data. This is the multiple-comparisons problem, and it is the reason a “signal” found by
             scanning ten digits usually evaporates. Corrections below control that error rate.
           </span>
         </span>
@@ -471,7 +471,8 @@ function BacktestTab({ digits, pipSize, symbol }: { digits: number[]; pipSize: n
   const strategy = s.strategies.find((x) => x.id === s.activeStrategyId) ?? s.strategies[0] ?? null;
   const [payout, setPayout] = useState(1.95);
   const [holdout, setHoldout] = useState(0.3);
-  const [cooldown, setCooldown] = useState(2);
+  // Backtests hold a fixed cooldown; there is no UI control for it yet, so the setter is unused.
+  const [cooldown] = useState(2);
   const [contractType, setContractType] = useState<DigitContractType>((strategy?.contractType as DigitContractType) ?? 'DIGITODD');
   const [barrier, setBarrier] = useState<number>(strategy?.barrier ?? 5);
 
@@ -499,7 +500,7 @@ function BacktestTab({ digits, pipSize, symbol }: { digits: number[]; pipSize: n
     return (
       <Card>
         <Empty title="No strategy to backtest">
-          Create and save one in <strong>Bot Builder</strong> first. The backtest evaluates the strategy's actual entry gate against the digit
+          Create and save one in <strong>Bot Builder</strong> first. The backtest evaluates the strategy’s actual entry gate against the digit
           series — there is nothing to evaluate without it.
         </Empty>
       </Card>
@@ -563,7 +564,7 @@ function BacktestTab({ digits, pipSize, symbol }: { digits: number[]; pipSize: n
           )}
           {!result.outOfSample.degraded && result.outOfSample.trades >= 20 && (
             <Banner tone="success">
-              The holdout's expected value held up relative to in-sample. That is necessary but not sufficient: it says the behaviour is
+              The holdout’s expected value held up relative to in-sample. That is necessary but not sufficient: it says the behaviour is
               stable across this particular split, not that it will persist in future data or survive real spreads, payout movement and
               execution latency.
             </Banner>

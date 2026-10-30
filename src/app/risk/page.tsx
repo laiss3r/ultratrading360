@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { AlertTriangle, RotateCcw, ShieldAlert, Trash2 } from 'lucide-react';
-import { Badge, Banner, Button, Card, Field, Stat, Toggle } from '@/components/ui';
+import { Banner, Button, Card, Field, Stat, Toggle } from '@/components/ui';
 import { useApp } from '@/state/store';
 import { money, pct, signed } from '@/lib/format';
 import { riskOfRuin, kellyFraction } from '@/lib/stats/ev';

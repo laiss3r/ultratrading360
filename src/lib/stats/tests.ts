@@ -29,7 +29,6 @@ export interface DigitFrequency {
 }
 
 export function digitFrequency(digits: number[], level = 0.95): DigitFrequency[] {
-  const n = digits.length;
   const counts = new Array(10).fill(0);
   for (const d of digits) if (d >= 0 && d <= 9) counts[d]++;
   const valid = counts.reduce((a, b) => a + b, 0);
@@ -53,7 +52,6 @@ export function digitFrequency(digits: number[], level = 0.95): DigitFrequency[]
  * H0: each digit occurs with probability 1/10. df = 9.
  */
 export function chiSquareUniformity(digits: number[]): TestResult {
-  const n = digits.length;
   const counts = new Array(10).fill(0);
   for (const d of digits) if (d >= 0 && d <= 9) counts[d]++;
   const valid = counts.reduce((a, b) => a + b, 0);

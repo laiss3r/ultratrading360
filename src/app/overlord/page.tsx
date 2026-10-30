@@ -449,7 +449,7 @@ export default function OverlordPage() {
             <ul className="space-y-1 text-[11px] leading-relaxed text-ink-2">
               <li>
                 <strong className="text-ink">Sample.</strong> For each open market we pull the last 300 ticks and extract the final digit using
-                that instrument's own <code className="num">pip_size</code>. Markets we cannot reach are skipped rather than scored zero.
+                that instrument’s own <code className="num">pip_size</code>. Markets we cannot reach are skipped rather than scored zero.
               </li>
               <li>
                 <strong className="text-ink">Digit entropy (weight 0.6).</strong> Shannon entropy of the observed last-digit distribution,

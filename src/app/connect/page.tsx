@@ -141,8 +141,8 @@ export default function ConnectPage() {
 
             <Banner tone="warn">
               <strong className="font-semibold">This app never asks for your Deriv password</strong> — only for an API token, which is what
-              Deriv's own documentation prescribes for third-party applications. A non-empty token is not treated as valid: the server calls
-              Deriv's authorize endpoint and only accepts the credentials Deriv itself confirms, together with the account list they control.
+              Deriv’s own documentation prescribes for third-party applications. A non-empty token is not treated as valid: the server calls
+              Deriv’s authorize endpoint and only accepts the credentials Deriv itself confirms, together with the account list they control.
               Tokens are held in an encrypted httpOnly cookie; they are not written to IndexedDB or to any log, and they are never returned to
               the browser.
             </Banner>
@@ -186,7 +186,7 @@ export default function ConnectPage() {
               </Link>
             </div>
             <Banner tone="info">
-              Disconnect clears the encrypted session cookie in this browser. Deriv's OAuth tokens have <strong>no refresh token and no
+              Disconnect clears the encrypted session cookie in this browser. Deriv’s OAuth tokens have <strong>no refresh token and no
               revocation endpoint</strong>, so clearing the cookie does not invalidate the credential server-side — revoke an API token at{' '}
               <a className="text-accent underline" href="https://app.deriv.com/account/api-token" target="_blank" rel="noreferrer">app.deriv.com/account/api-token</a>{' '}
               if you want it permanently dead.

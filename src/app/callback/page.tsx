@@ -18,33 +18,35 @@ function CallbackInner() {
   const router = useRouter();
   const params = useSearchParams();
   const s = useApp();
-  const [status, setStatus] = useState<'working' | 'ok' | 'error'>('working');
-  const [message, setMessage] = useState('Completing Deriv sign-in…');
-  const [detail, setDetail] = useState<string | null>(null);
+  // The outcome of the server-side exchange. `null` until it resolves.
+  const [exchange, setExchange] = useState<{
+    status: 'ok' | 'error';
+    message: string;
+    detail: string | null;
+  } | null>(null);
   const fired = useRef(false);
 
+  const error = params.get('error');
+  const errorDescription = params.get('error_description');
+  const code = params.get('code');
+  const state = params.get('state');
+
+  // URL-level failures are DERIVED during render, not written to state from an effect. The query
+  // string is already known synchronously, so an effect here would only add a first render that
+  // claims "working" before correcting itself.
+  const urlFailure = error
+    ? { message: `Deriv returned an error: ${error}`, detail: errorDescription ?? null }
+    : !code || !state
+      ? {
+          message: 'The callback URL is missing its code or state parameter.',
+          detail: 'Start the sign-in again from the Connect page.',
+        }
+      : null;
+
   useEffect(() => {
+    if (urlFailure !== null || error || !code || !state) return;
     if (fired.current) return;
     fired.current = true;
-
-    const error = params.get('error');
-    const errorDescription = params.get('error_description');
-    if (error) {
-      // Deriv reports user cancellation / denial here; that is not a system failure.
-      setStatus('error');
-      setMessage(`Deriv returned an error: ${error}`);
-      setDetail(errorDescription ?? null);
-      return;
-    }
-
-    const code = params.get('code');
-    const state = params.get('state');
-    if (!code || !state) {
-      setStatus('error');
-      setMessage('The callback URL is missing its code or state parameter.');
-      setDetail('Start the sign-in again from the Connect page.');
-      return;
-    }
 
     (async () => {
       try {
@@ -57,25 +59,37 @@ function CallbackInner() {
         });
         const j = await r.json();
         if (!r.ok || !j.ok) {
-          setStatus('error');
-          setMessage(j.message ?? `Sign-in failed (HTTP ${r.status}).`);
-          setDetail(j.error ?? null);
+          setExchange({
+            status: 'error',
+            message: j.message ?? `Sign-in failed (HTTP ${r.status}).`,
+            detail: j.error ?? null,
+          });
           s.pushLog('error', `OAuth callback failed: ${j.message ?? r.status}`);
           return;
         }
-        setStatus('ok');
-        setMessage(`Signed in as ${j.session?.loginid ?? 'your Deriv account'}.`);
+        setExchange({
+          status: 'ok',
+          message: `Signed in as ${j.session?.loginid ?? 'your Deriv account'}.`,
+          detail: null,
+        });
         s.pushLog('ok', 'OAuth sign-in completed. Token stored server-side in an encrypted httpOnly cookie.');
         await s.refreshSession(false);
         setTimeout(() => router.replace('/connect'), 1400);
       } catch (e) {
-        setStatus('error');
-        setMessage('Could not reach the sign-in endpoint.');
-        setDetail((e as Error).message);
+        setExchange({
+          status: 'error',
+          message: 'Could not reach the sign-in endpoint.',
+          detail: (e as Error).message,
+        });
         s.pushLog('error', `OAuth callback transport error: ${(e as Error).message}`);
       }
     })();
-  }, [params, router, s]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [error, code, state, router, s]);
+
+  const status = urlFailure ? 'error' : exchange?.status ?? 'working';
+  const message = urlFailure?.message ?? exchange?.message ?? 'Completing Deriv sign-in…';
+  const detail = urlFailure?.detail ?? exchange?.detail ?? null;
 
   const Icon = status === 'ok' ? CheckCircle2 : status === 'error' ? XCircle : Loader2;
 

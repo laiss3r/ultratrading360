@@ -4,7 +4,7 @@ import { create } from 'zustand';
 import type { AccountMode, ActiveSymbol, AuthSession } from '@/lib/deriv/types';
 import { DERIV_APP_ID } from '@/lib/deriv/config';
 import { DerivProvider, SimulationProvider, type MarketProvider, type Quote } from '@/lib/engine/provider';
-import { RiskManager, type RecoveryConfig, type RiskLimits, type RiskSnapshot } from '@/lib/engine/risk';
+import { RiskManager, type RiskSnapshot } from '@/lib/engine/risk';
 import { TradingBot, type BotState, type TradeRecord } from '@/lib/engine/bot';
 import { createStrategy, validateStrategy, type Strategy } from '@/lib/engine/strategies';
 import { computeMetrics, type PerformanceMetrics } from '@/lib/metrics';

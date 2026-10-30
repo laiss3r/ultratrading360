@@ -70,7 +70,6 @@ export interface EvaluationResult {
 export function evaluateCondition(c: Condition, w: DigitWindow): EvaluationResult {
   const d = w.digits;
   const last = d[d.length - 1];
-  const reasons: string[] = [];
   const need = (n: number): { ok: boolean } => {
     if (d.length < n) {
       return { ok: false };

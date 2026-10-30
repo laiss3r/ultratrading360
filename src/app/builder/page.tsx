@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Copy, Pause, Play, Plus, Save, Square, Trash2, Zap } from 'lucide-react';
 import { Badge, Banner, Button, Card, Empty, Field } from '@/components/ui';
 import { ConditionTree } from '@/components/ConditionTree';
@@ -35,27 +35,33 @@ export default function BuilderPage() {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const selected = s.strategies.find((x) => x.id === s.activeStrategyId) ?? s.strategies[0] ?? null;
+  const selectedId = selected?.id ?? null;
 
   // Load the selected strategy into the editor when the selection changes.
-  useEffect(() => {
-    if (!selected) {
-      setDraft(null);
-      return;
-    }
-    if (draft?.id === selected.id && !dirty) return;
-    setDraft(structuredClone(selected));
+  //
+  // This uses React's documented "adjust state during render" pattern instead of an effect. The
+  // editor contents are derived from WHICH strategy is selected, so an effect would first commit a
+  // render showing the previous strategy and then correct it in a second render. Comparing against
+  // the id we last loaded from is what keeps this from looping.
+  //
+  // It deliberately does not consult `dirty`: editing the draft never resets it, because the id has
+  // not changed. Only switching strategies (or losing the selection) reloads.
+  const [loadedId, setLoadedId] = useState<string | null>(null);
+  if (selectedId !== loadedId) {
+    setLoadedId(selectedId);
+    setDraft(selected ? structuredClone(selected) : null);
     setDirty(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected?.id, s.strategies.length]);
+  }
 
-  // First-run: nothing saved yet. Offer a starter rather than an empty screen.
-  useEffect(() => {
-    if (s.hydrated && s.strategies.length === 0 && !draft) {
-      setDraft(createStrategy({ name: 'My first strategy' }));
-      setDirty(true);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [s.hydrated, s.strategies.length]);
+  // First run: nothing saved yet, so offer a starter rather than an empty screen. Also derived
+  // during render so the empty state never flashes. Once per mount is enough — the "New strategy"
+  // button covers the case where the user later deletes everything.
+  const [starterOffered, setStarterOffered] = useState(false);
+  if (s.hydrated && !starterOffered && s.strategies.length === 0 && !draft) {
+    setStarterOffered(true);
+    setDraft(createStrategy({ name: 'My first strategy' }));
+    setDirty(true);
+  }
 
   const validation = useMemo(() => (draft ? validateStrategy(draft) : null), [draft]);
 
@@ -324,7 +330,7 @@ export default function BuilderPage() {
                       {gateEval.insufficientData && (
                         <Banner tone="warn">
                           The gate needs {gateEval.requiredDigits} digits but only {s.digits.length} are buffered. Waiting for more ticks
-                          rather than guessing — an under-sampled gate reports "needs data", never a false positive.
+                          rather than guessing — an under-sampled gate reports “needs data”, never a false positive.
                         </Banner>
                       )}
                       <div className="border-t border-line pt-2">

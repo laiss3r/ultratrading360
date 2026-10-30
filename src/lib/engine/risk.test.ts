@@ -154,7 +154,7 @@ describe('recovery mode can never override a risk limit', () => {
       enabled: true, multiplier: 2, stepLimit: 3, maxStake: 1000, maxDrawdown: 1e9,
     }, 1000);
     expect(rm.suggestRecoveryStake(1)).toBe(1); // no losses yet
-    for (const _ of [0, 1, 2]) {
+    for (let i = 0; i < 3; i++) {
       rm.openExposure(1);
       rm.closeExposure(1, -1);
     }
