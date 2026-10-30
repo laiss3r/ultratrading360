@@ -184,11 +184,9 @@ export default function HistoryPage() {
                     </td>
                     <td className="num px-3 py-1.5 text-right text-less-prominent">{t.balanceAfter.toFixed(2)}</td>
                     <td className="px-3 py-1.5">
-                      {t.source === 'deriv_live' ? (
-                        <Badge tone={t.mode === 'deriv_real' ? 'loss' : 'info'}>{t.mode === 'deriv_real' ? 'REAL' : 'DEMO'}</Badge>
-                      ) : (
-                        <Badge tone="brand">SIM</Badge>
-                      )}
+                      {/* Every stored record comes from Deriv; the badge says which
+                          account class executed it. */}
+                      <Badge tone={t.mode === 'deriv_real' ? 'loss' : 'info'}>{t.mode === 'deriv_real' ? 'REAL' : 'DEMO'}</Badge>
                     </td>
                     <td className="px-3 py-1.5">
                       {t.error ? (

@@ -623,3 +623,53 @@ describe('stake progressions', () => {
     expect(stakesOf(bot)).toEqual([1, 1, 1]);
   });
 });
+
+describe('indicator gates', () => {
+  it('a Bollinger gate that never triggers produces zero trades, not fabricated ones', async () => {
+    const provider = new ScriptedProvider();
+    provider.settleAs = 'win';
+    const strategy = alwaysStrategy({
+      entry: { id: 'root', op: 'AND', children: [{ id: 'bb', kind: 'bbBelowLower', n: 20 }] },
+    });
+    const bot = new TradingBot(
+      strategy,
+      provider,
+      new RiskManager({ ...DEFAULT_RISK_LIMITS, tradingEnabled: true, maxStake: 100, maxSessionLoss: 1e9, maxDailyLoss: 1e9 }, { ...DEFAULT_RECOVERY }),
+      {},
+    );
+    await bot.start(20);
+    // ScriptedProvider emits a flat-ish price series, so the price never leaves
+    // its own bands: the gate must stay shut and the bot must stay idle.
+    for (let i = 0; i < 40; i++) {
+      provider.push('R_100', 7);
+      await flush();
+    }
+    expect(bot.getTrades()).toHaveLength(0);
+    expect(provider.executeCalls).toBe(0);
+  });
+
+  it('an SMA gate opens once the latest price crosses above the mean', async () => {
+    const provider = new ScriptedProvider();
+    provider.settleAs = 'win';
+    const strategy = alwaysStrategy({
+      entry: { id: 'root', op: 'AND', children: [{ id: 's', kind: 'smaAbove', n: 5 }] },
+    });
+    const bot = new TradingBot(
+      strategy,
+      provider,
+      new RiskManager({ ...DEFAULT_RISK_LIMITS, tradingEnabled: true, maxStake: 100, maxSessionLoss: 1e9, maxDailyLoss: 1e9 }, { ...DEFAULT_RECOVERY }),
+      {},
+    );
+    await bot.start(20);
+    // ScriptedProvider prices sit at 571.9 + digit/100; pushing digit 9 repeatedly
+    // keeps the series flat (gate shut), then a jump opens it.
+    for (let i = 0; i < 6; i++) {
+      provider.push('R_100', 5);
+      await flush();
+    }
+    const flatTrades = bot.getTrades().length;
+    provider.push('R_100', 9);
+    await flush();
+    expect(bot.getTrades().length).toBeGreaterThan(flatTrades);
+  });
+});

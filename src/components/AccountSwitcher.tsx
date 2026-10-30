@@ -92,7 +92,7 @@ export function AccountSwitcher() {
         </span>
         <span className="text-left leading-tight">
           <span className="block text-xxs text-less-prominent">{session ? (session.isVirtual ? 'Demo' : 'Real') : 'Not connected'}</span>
-          <span className="num block text-xs font-bold text-prominent">{session ? loginid : 'SIM'}</span>
+          <span className="num block text-xs font-bold text-prominent">{session ? loginid : 'No account'}</span>
         </span>
         <span className="num hidden border-l border-line pl-2.5 text-xs font-bold text-prominent sm:block">{balance}</span>
         <ChevronDown size={14} className={cn('text-less-prominent transition-transform', open && 'rotate-180')} />

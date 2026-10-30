@@ -45,7 +45,7 @@ function FullScreenButton() {
   };
 
   return (
-    <button type="button" className="dt-footer__btn" onClick={toggle} title={isFull ? 'Exit full screen' : 'Full screen'}>
+    <button type="button" className="dt-footer__btn" data-mobile-hide="true" onClick={toggle} title={isFull ? 'Exit full screen' : 'Full screen'}>
       {isFull ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
       <span className="hidden lg:inline">{isFull ? 'Exit full screen' : 'Full screen'}</span>
     </button>
@@ -60,6 +60,7 @@ function ThemeButton() {
     <button
       type="button"
       className="dt-footer__btn"
+      data-mobile-hide="true"
       onClick={() => void setSettings({ uiTheme: dark ? 'light' : 'dark' })}
       title={dark ? 'Switch to light theme' : 'Switch to dark theme'}
       aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'}

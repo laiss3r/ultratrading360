@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BarChart3, Blocks, LayoutDashboard, LineChart, PanelRight, Zap } from 'lucide-react';
+import { BarChart3, Blocks, LayoutDashboard, LineChart, Moon, PanelRight, Sun, Zap } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { useApp } from '@/state/store';
 import { AccountSwitcher } from './AccountSwitcher';
@@ -24,6 +24,9 @@ export function AppHeader() {
   const pathname = usePathname();
   const openQuickStrategy = useApp((s) => s.openQuickStrategy);
   const openRunPanel = useApp((s) => s.setRunPanelOpen);
+  const uiTheme = useApp((s) => s.settings.uiTheme);
+  const setSettings = useApp((s) => s.setSettings);
+  const dark = uiTheme === 'dark';
 
   return (
     <header className="dt-header">
@@ -43,6 +46,17 @@ export function AppHeader() {
       </nav>
 
       <div className="ml-auto flex items-center gap-2 md:gap-3">
+        {/* The footer's theme toggle is hidden on phones (the footer keeps only the
+            clock and the connection status there), so it lives in the header instead. */}
+        <button
+          type="button"
+          onClick={() => void setSettings({ uiTheme: dark ? 'light' : 'dark' })}
+          className="inline-flex items-center justify-center rounded border border-line p-2 text-general transition-colors hover:bg-state-hover md:hidden"
+          aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'}
+          title={dark ? 'Switch to light theme' : 'Switch to dark theme'}
+        >
+          {dark ? <Sun size={16} /> : <Moon size={16} />}
+        </button>
         <button
           type="button"
           onClick={openQuickStrategy}

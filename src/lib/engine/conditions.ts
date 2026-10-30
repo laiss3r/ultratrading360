@@ -22,7 +22,16 @@ export type ConditionKind =
   | 'rollingFrequency'
   | 'consecutiveParity'
   | 'consecutiveOver'
-  | 'consecutiveUnder';
+  | 'consecutiveUnder'
+  /* Indicator conditions over the tick price series, the way Deriv Bot's
+     Indicators subtab gates a purchase: period in ticks, evaluated on the
+     latest price against the indicator's own line. */
+  | 'smaAbove'
+  | 'smaBelow'
+  | 'rsiAbove'
+  | 'rsiBelow'
+  | 'bbAboveUpper'
+  | 'bbBelowLower';
 
 export interface Condition {
   id: string;
@@ -52,10 +61,18 @@ export function isGroup(x: Condition | ConditionGroup): x is ConditionGroup {
 }
 
 /** Digits, oldest first, newest last. */
+import { bollinger, rsi, sma, type BollingerBands } from './indicators';
+
 export interface DigitWindow {
   digits: number[];
   symbol: string;
   pipSize: number;
+  /**
+   * Tick prices, oldest first. Digit conditions ignore this; indicator
+   * conditions need it, and report insufficient data when the series is
+   * shorter than their period rather than evaluating a partial window.
+   */
+  prices?: number[];
 }
 
 export interface EvaluationResult {
@@ -143,6 +160,44 @@ export function evaluateCondition(c: Condition, w: DigitWindow): EvaluationResul
       return res(allMatch, [`last ${n} digits [${window.join(',')}] all ${over ? '>' : '<'} ${b}`], n, false);
     }
 
+    case 'smaAbove':
+    case 'smaBelow': {
+      const p = c.n ?? 20;
+      const prices = w.prices ?? [];
+      if (prices.length < p) return res(false, [`SMA(${p}) needs ${p} prices, have ${prices.length}`], 0, true);
+      const m = sma(prices, p) as number;
+      const lastP = prices[prices.length - 1];
+      const above = c.kind === 'smaAbove';
+      return res(above ? lastP > m : lastP < m, [`last price ${lastP} ${above ? '>' : '<'} SMA(${p}) ${m.toFixed(4)}`], 0, false);
+    }
+
+    case 'rsiAbove':
+    case 'rsiBelow': {
+      const p = c.n ?? 14;
+      const level = c.threshold ?? (c.kind === 'rsiAbove' ? 70 : 30);
+      const prices = w.prices ?? [];
+      if (prices.length < p + 1) return res(false, [`RSI(${p}) needs ${p + 1} prices, have ${prices.length}`], 0, true);
+      const v = rsi(prices, p) as number;
+      const above = c.kind === 'rsiAbove';
+      return res(above ? v >= level : v <= level, [`RSI(${p}) ${v.toFixed(1)} ${above ? '>=' : '<='} ${level}`], 0, false);
+    }
+
+    case 'bbAboveUpper':
+    case 'bbBelowLower': {
+      const p = c.n ?? 20;
+      const prices = w.prices ?? [];
+      if (prices.length < p) return res(false, [`Bollinger(${p}) needs ${p} prices, have ${prices.length}`], 0, true);
+      const bb = bollinger(prices, p, 2) as BollingerBands;
+      const lastP = prices[prices.length - 1];
+      const upper = c.kind === 'bbAboveUpper';
+      return res(
+        upper ? lastP > bb.upper : lastP < bb.lower,
+        [`last price ${lastP} ${upper ? '>' : '<'} Bollinger(${p}) ${upper ? 'upper' : 'lower'} ${ (upper ? bb.upper : bb.lower).toFixed(4)}`],
+        0,
+        false,
+      );
+    }
+
     default:
       return res(false, [`unknown condition kind: ${(c as Condition).kind}`], 0, false);
   }
@@ -180,6 +235,13 @@ export function describeCondition(c: Condition): string {
     case 'consecutiveParity': return `${c.n ?? 3} consecutive ${(c.digit ?? 0) % 2 === 0 ? 'EVEN' : 'ODD'} digits`;
     case 'consecutiveOver': return `${c.n ?? 3} consecutive digits OVER ${c.barrier ?? 5}`;
     case 'consecutiveUnder': return `${c.n ?? 3} consecutive digits UNDER ${c.barrier ?? 5}`;
+    case 'smaAbove': return `Last price above SMA(${c.n ?? 20})`;
+    case 'smaBelow': return `Last price below SMA(${c.n ?? 20})`;
+    case 'rsiAbove': return `RSI(${c.n ?? 14}) at or above ${c.threshold ?? 70}`;
+    case 'rsiBelow': return `RSI(${c.n ?? 14}) at or below ${c.threshold ?? 30}`;
+    case 'bbAboveUpper': return `Last price above upper Bollinger(${c.n ?? 20}) band`;
+    case 'bbBelowLower': return `Last price below lower Bollinger(${c.n ?? 20}) band`;
+    default: return c.kind;
   }
 }
 
@@ -187,6 +249,14 @@ export function describeCondition(c: Condition): string {
 export function validateCondition(c: Condition): string[] {
   const errs: string[] = [];
   const needsBarrier = ['over', 'under', 'match', 'differ', 'consecutiveOver', 'consecutiveUnder'];
+  const needsPeriod = ['smaAbove', 'smaBelow', 'rsiAbove', 'rsiBelow', 'bbAboveUpper', 'bbBelowLower'];
+  if (needsPeriod.includes(c.kind)) {
+    const n = c.n ?? 20;
+    if (!Number.isFinite(n) || n < 2 || n > 1000) errs.push('indicator period must be between 2 and 1000 ticks');
+  }
+  if ((c.kind === 'rsiAbove' || c.kind === 'rsiBelow') && c.threshold != null && (c.threshold < 0 || c.threshold > 100)) {
+    errs.push('RSI level must be between 0 and 100');
+  }
   if (needsBarrier.includes(c.kind)) {
     if (c.barrier === undefined || !Number.isInteger(c.barrier) || c.barrier < 0 || c.barrier > 9) {
       errs.push(`${c.kind}: barrier must be an integer 0..9`);

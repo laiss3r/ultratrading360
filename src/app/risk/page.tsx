@@ -115,12 +115,6 @@ export default function RiskPage() {
                   : 'Connect a real Deriv account first.'
               }
             />
-            {false && (
-              <Banner tone="info">
-                You are in SIM mode. Enabling trading here is still required to run a bot, but simulated orders are settled locally by the
-                seeded engine and are <strong>never</strong> sent to Deriv.
-              </Banner>
-            )}
           </div>
         </Card>
 

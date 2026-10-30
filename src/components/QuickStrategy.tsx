@@ -7,7 +7,7 @@ import { Banner, Button, Field, Modal, Tabs } from './ui';
 import { cn } from '@/lib/cn';
 import { createStrategy } from '@/lib/engine/strategies';
 import { theoreticalDigitProbability } from '@/lib/deriv/digits';
-import type { DigitContractType } from '@/lib/deriv/contracts';
+import type { ContractType, DigitContractType } from '@/lib/deriv/contracts';
 import {
   DERIV_STAKE_MIN,
   PROGRESSIONS,
@@ -17,13 +17,15 @@ import {
 } from '@/lib/engine/progressions';
 
 /** Deriv's own labels for the digit trade types, grouped as "Digits". */
-const TRADE_TYPES: { value: DigitContractType; label: string; needsBarrier: boolean }[] = [
+const TRADE_TYPES: { value: ContractType; label: string; needsBarrier: boolean }[] = [
   { value: 'DIGITODD', label: 'Odd', needsBarrier: false },
   { value: 'DIGITEVEN', label: 'Even', needsBarrier: false },
   { value: 'DIGITOVER', label: 'Over', needsBarrier: true },
   { value: 'DIGITUNDER', label: 'Under', needsBarrier: true },
   { value: 'DIGITMATCH', label: 'Matches', needsBarrier: true },
   { value: 'DIGITDIFF', label: 'Differs', needsBarrier: true },
+  { value: 'CALL', label: 'Rise', needsBarrier: false },
+  { value: 'PUT', label: 'Fall', needsBarrier: false },
 ];
 
 /**
@@ -53,7 +55,7 @@ export function QuickStrategy() {
   const rankMarkets = useApp((s) => s.rankMarkets);
 
   const [tab, setTab] = useState<'parameters' | 'learn'>('parameters');
-  const [tradeType, setTradeType] = useState<DigitContractType>('DIGITODD');
+  const [tradeType, setTradeType] = useState<ContractType>('DIGITODD');
   const [barrier, setBarrier] = useState(5);
   const [market, setMarket] = useState(activeSymbol || 'R_100');
   const [duration, setDuration] = useState(1);
@@ -71,8 +73,15 @@ export function QuickStrategy() {
   const currency = session?.currency ?? 'USD';
   const info = PROGRESSIONS[kind];
 
-  const winProb = useMemo(() => theoreticalDigitProbability(tradeType, needsBarrier ? barrier : undefined), [tradeType, barrier, needsBarrier]);
-  const breakEvenMultiplier = winProb > 0 ? 1 / winProb : Infinity;
+  // Only digit contracts have a fair-draw probability. Direction contracts
+  // (Rise / Fall) do not: their win rate depends entirely on your entry
+  // conditions, so nothing is assumed here.
+  const isDigitType = tradeType.startsWith('DIGIT');
+  const winProb = useMemo(
+    () => (isDigitType ? theoreticalDigitProbability(tradeType as DigitContractType, needsBarrier ? barrier : undefined) : null),
+    [tradeType, barrier, needsBarrier, isDigitType],
+  );
+  const breakEvenMultiplier = winProb && winProb > 0 ? 1 / winProb : Infinity;
 
   const worst5 = worstCaseStake({ kind, unit: stake, multiplier }, 5);
   const worst10 = worstCaseStake({ kind, unit: stake, multiplier }, 10);
@@ -177,7 +186,7 @@ export function QuickStrategy() {
           <div>
             <span className="dt-section-title mb-1.5 block">Trade type · Digits</span>
             <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-6">
-              {TRADE_TYPES.map((t) => (
+              {TRADE_TYPES.filter((t) => t.value.startsWith('DIGIT')).map((t) => (
                 <button
                   key={t.value}
                   type="button"
@@ -194,6 +203,30 @@ export function QuickStrategy() {
                 </button>
               ))}
             </div>
+            <span className="dt-section-title mb-1.5 mt-3 block">Trade type · Direction</span>
+            <div className="grid grid-cols-2 gap-1.5">
+              {TRADE_TYPES.filter((t) => !t.value.startsWith('DIGIT')).map((t) => (
+                <button
+                  key={t.value}
+                  type="button"
+                  onClick={() => setTradeType(t.value)}
+                  aria-pressed={tradeType === t.value}
+                  title={t.value === 'CALL' ? 'Rise: wins if the exit tick price is above the entry tick price.' : 'Fall: wins if the exit tick price is below the entry tick price.'}
+                  className={cn(
+                    'rounded border px-2 py-2 text-xs font-bold transition-colors',
+                    tradeType === t.value
+                      ? 'border-coral bg-coral-wash text-coral'
+                      : 'border-line bg-main-1 text-general hover:bg-state-hover',
+                  )}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-2 text-xxs leading-relaxed text-less-prominent">
+              Direction contracts settle on the exit tick price versus the entry tick price. Deriv quotes the payout when
+              you buy; no win probability is assumed here, because it depends entirely on your entry conditions.
+            </p>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -348,9 +381,16 @@ export function QuickStrategy() {
                     {worst10.toFixed(2)} {currency}
                   </span>
                 </Row>
-                <Row label={`Theoretical win probability (${TRADE_TYPES.find((t) => t.value === tradeType)?.label}${needsBarrier ? ` ${barrier}` : ''})`}>
-                  <span className="num font-bold text-prominent">{(winProb * 100).toFixed(1)}%</span>
-                </Row>
+                {isDigitType && (
+                  <Row label={`Theoretical win probability (${TRADE_TYPES.find((t) => t.value === tradeType)?.label}${needsBarrier ? ` ${barrier}` : ''})`}>
+                    <span className="num font-bold text-prominent">{((winProb ?? 0) * 100).toFixed(1)}%</span>
+                  </Row>
+                )}
+                {!isDigitType && (
+                  <Row label="Assumed win probability">
+                    <span className="text-sm text-faint">None assumed — Rise / Fall win rate depends on your entry conditions</span>
+                  </Row>
+                )}
                 <Row label="Break-even payout multiple">
                   <span className="num font-bold text-prominent">
                     {Number.isFinite(breakEvenMultiplier) ? `${breakEvenMultiplier.toFixed(3)}×` : '—'}

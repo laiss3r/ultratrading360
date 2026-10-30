@@ -185,3 +185,66 @@ describe("the 'always' condition (unconditional entry)", () => {
     expect(evaluateGroup(orGroup, w).satisfied).toBe(true);
   });
 });
+
+describe('indicator conditions (price series)', () => {
+  const pwin = (prices: number[], digits: number[] = []): DigitWindow => ({
+    digits,
+    prices,
+    symbol: 'R_100',
+    pipSize: 2,
+  });
+
+  it('smaAbove / smaBelow compare the last price with the mean of the period', () => {
+    const prices = [10, 10, 10, 10, 20]; // mean of last 5 = 12, last = 20
+    expect(evaluateCondition({ id: '1', kind: 'smaAbove', n: 5 }, pwin(prices)).satisfied).toBe(true);
+    expect(evaluateCondition({ id: '1', kind: 'smaBelow', n: 5 }, pwin(prices)).satisfied).toBe(false);
+    expect(evaluateCondition({ id: '1', kind: 'smaBelow', n: 5 }, pwin([20, 20, 20, 20, 10])).satisfied).toBe(true);
+  });
+
+  it('reports insufficient data instead of evaluating a partial window', () => {
+    const r = evaluateCondition({ id: '1', kind: 'smaAbove', n: 50 }, pwin([1, 2, 3]));
+    expect(r.satisfied).toBe(false);
+    expect(r.insufficientData).toBe(true);
+    expect(r.reasons[0]).toMatch(/needs 50 prices, have 3/);
+  });
+
+  it('rsiAbove fires on an overbought (all-gain) series at the default 70', () => {
+    const up = Array.from({ length: 30 }, (_, i) => 100 + i);
+    expect(evaluateCondition({ id: '1', kind: 'rsiAbove', n: 14 }, pwin(up)).satisfied).toBe(true);
+    expect(evaluateCondition({ id: '1', kind: 'rsiBelow', n: 14 }, pwin(up)).satisfied).toBe(false);
+  });
+
+  it('rsiBelow respects a custom level', () => {
+    const up = Array.from({ length: 30 }, (_, i) => 100 + i);
+    expect(evaluateCondition({ id: '1', kind: 'rsiBelow', n: 14, threshold: 100 }, pwin(up)).satisfied).toBe(true);
+  });
+
+  it('bbBelowLower catches a price crash through the lower band', () => {
+    const prices = [...Array(19).fill(10), 4];
+    const r = evaluateCondition({ id: '1', kind: 'bbBelowLower', n: 20 }, pwin(prices));
+    expect(r.satisfied).toBe(true);
+    expect(r.reasons[0]).toMatch(/lower/);
+    // A flat series never leaves its own bands.
+    expect(evaluateCondition({ id: '1', kind: 'bbBelowLower', n: 20 }, pwin(Array(20).fill(10))).satisfied).toBe(false);
+    expect(evaluateCondition({ id: '1', kind: 'bbAboveUpper', n: 20 }, pwin(Array(20).fill(10))).satisfied).toBe(false);
+  });
+
+  it('indicators participate in groups and describe themselves', () => {
+    const g: ConditionGroup = {
+      id: 'g',
+      op: 'AND',
+      children: [
+        { id: 'a', kind: 'odd' },
+        { id: 'b', kind: 'smaAbove', n: 3 },
+      ],
+    };
+    const r = evaluateGroup(g, { digits: [3], prices: [1, 2, 10], symbol: 'R_100', pipSize: 2 });
+    expect(r.satisfied).toBe(true);
+    expect(describeCondition({ id: 'b', kind: 'smaAbove', n: 3 })).toBe('Last price above SMA(3)');
+  });
+
+  it('validation accepts indicator conditions with sane periods', () => {
+    expect(validateCondition({ id: '1', kind: 'rsiAbove', n: 14, threshold: 70 })).toEqual([]);
+    expect(validateCondition({ id: '1', kind: 'smaAbove', n: 0 }).length).toBeGreaterThan(0);
+  });
+});

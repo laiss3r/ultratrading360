@@ -66,6 +66,7 @@ export class TradingBot {
   private executedKeys = new Set<string>();
   private tradeIndex = 0;
   private digits: number[] = [];
+  private prices: number[] = [];
   private pipSize = 2;
   private stopDisposer: (() => void) | null = null;
   private inFlight: Promise<void> | null = null;
@@ -130,6 +131,7 @@ export class TradingBot {
       if (!this.provider.isConnected()) await this.provider.connect();
       const hist = await this.provider.history(this.strategy.market, historySize);
       this.digits = hist.map((q) => q.digit);
+      this.prices = hist.map((q) => q.price);
       this.pipSize = hist[0]?.pipSize ?? 2;
       this.risk.setEquity(this.balance);
 
@@ -187,6 +189,8 @@ export class TradingBot {
 
     this.digits.push(q.digit);
     if (this.digits.length > 5000) this.digits.shift();
+    this.prices.push(q.price);
+    if (this.prices.length > 5000) this.prices.shift();
     this.pipSize = q.pipSize;
 
     // Cooldown
@@ -200,7 +204,7 @@ export class TradingBot {
       return;
     }
 
-    const window: DigitWindow = { digits: this.digits, symbol: q.symbol, pipSize: this.pipSize };
+    const window: DigitWindow = { digits: this.digits, prices: this.prices, symbol: q.symbol, pipSize: this.pipSize };
     const gate = evaluateGroup(this.strategy.entry, window);
     this.events.onGate?.(gate.satisfied, gate.reasons);
     if (!gate.satisfied) return;

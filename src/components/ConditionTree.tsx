@@ -9,7 +9,7 @@ let seq = 0;
 const nid = (p: string) => `${p}${++seq}${Date.now().toString(36).slice(-3)}`;
 
 /** Toolbox grouping, mirroring how Deriv Bot files its blocks into categories. */
-export type ConditionCategory = 'flow' | 'digits' | 'history';
+export type ConditionCategory = 'flow' | 'digits' | 'history' | 'indicators';
 
 export const KINDS: { value: ConditionKind; label: string; hint: string; category: ConditionCategory }[] = [
   { value: 'always', label: 'Always (no filter)', hint: 'Passes unconditionally. Trade every eligible tick, limited only by cooldown and the risk manager.', category: 'flow' },
@@ -24,12 +24,19 @@ export const KINDS: { value: ConditionKind; label: string; hint: string; categor
   { value: 'consecutiveParity', label: 'N consecutive parity', hint: 'The last N digits are all odd or all even.', category: 'history' },
   { value: 'consecutiveOver', label: 'N consecutive OVER', hint: 'The last N digits are all above a barrier.', category: 'history' },
   { value: 'consecutiveUnder', label: 'N consecutive UNDER', hint: 'The last N digits are all below a barrier.', category: 'history' },
+  { value: 'smaAbove', label: 'Price above SMA', hint: 'Latest tick price is above its simple moving average over N ticks.', category: 'indicators' },
+  { value: 'smaBelow', label: 'Price below SMA', hint: 'Latest tick price is below its simple moving average over N ticks.', category: 'indicators' },
+  { value: 'rsiAbove', label: 'RSI above level', hint: 'Wilder RSI over N ticks is at or above the level (default 70).', category: 'indicators' },
+  { value: 'rsiBelow', label: 'RSI below level', hint: 'Wilder RSI over N ticks is at or below the level (default 30).', category: 'indicators' },
+  { value: 'bbAboveUpper', label: 'Price above upper Bollinger band', hint: 'Latest tick price is above SMA + 2 standard deviations over N ticks.', category: 'indicators' },
+  { value: 'bbBelowLower', label: 'Price below lower Bollinger band', hint: 'Latest tick price is below SMA - 2 standard deviations over N ticks.', category: 'indicators' },
 ];
 
 export const CATEGORY_META: Record<ConditionCategory, { label: string; colour: string }> = {
   flow: { label: 'Trade flow', colour: 'var(--color-block-market)' },
   digits: { label: 'Last digit', colour: 'var(--color-block-purchase)' },
   history: { label: 'Digit history', colour: 'var(--color-block-math)' },
+  indicators: { label: 'Indicators', colour: 'var(--color-blue)' },
 };
 
 const LOGIC_COLOUR = 'var(--color-block-logic)';
@@ -50,6 +57,15 @@ export function defaultsFor(kind: ConditionKind): Condition {
       return { ...base, digit: 5, n: 10, threshold: 2 };
     case 'rollingFrequency':
       return { ...base, digit: 5, n: 50, minPct: 0, maxPct: 8 };
+    case 'smaAbove':
+    case 'smaBelow':
+    case 'bbAboveUpper':
+    case 'bbBelowLower':
+      return { ...base, n: 20 };
+    case 'rsiAbove':
+      return { ...base, n: 14, threshold: 70 };
+    case 'rsiBelow':
+      return { ...base, n: 14, threshold: 30 };
     case 'consecutiveParity':
       return { ...base, digit: 1, n: 3 };
     case 'consecutiveOver':
@@ -258,6 +274,8 @@ function ConditionBlock({
   const colour = CATEGORY_META[meta?.category ?? 'digits'].colour;
   const needsBarrier = ['over', 'under', 'match', 'differ'].includes(condition.kind);
   const needsN = ['lastNContains', 'rollingFrequency', 'consecutiveParity', 'consecutiveOver', 'consecutiveUnder'].includes(condition.kind);
+  const needsPeriod = ['smaAbove', 'smaBelow', 'rsiAbove', 'rsiBelow', 'bbAboveUpper', 'bbBelowLower'].includes(condition.kind);
+  const needsLevel = condition.kind === 'rsiAbove' || condition.kind === 'rsiBelow';
   const needsDigit = ['lastNContains', 'rollingFrequency'].includes(condition.kind);
   const parityDigit = condition.kind === 'consecutiveParity';
 
@@ -282,6 +300,8 @@ function ConditionBlock({
         )}
         {needsDigit && <MiniNum label="digit" value={condition.digit ?? 5} min={0} max={9} step={1} onChange={(v) => onChange({ ...condition, digit: v })} />}
         {needsN && <MiniNum label="window N" value={condition.n ?? 10} min={1} max={1000} step={1} onChange={(v) => onChange({ ...condition, n: v })} />}
+        {needsPeriod && <MiniNum label="period" value={condition.n ?? 20} min={2} max={1000} step={1} onChange={(v) => onChange({ ...condition, n: v })} />}
+        {needsLevel && <MiniNum label="level" value={condition.threshold ?? (condition.kind === 'rsiAbove' ? 70 : 30)} min={0} max={100} step={1} onChange={(v) => onChange({ ...condition, threshold: v })} />}
         {condition.kind === 'lastNContains' && (
           <MiniNum label="min count" value={condition.threshold ?? 1} min={1} max={1000} step={1} onChange={(v) => onChange({ ...condition, threshold: v })} />
         )}

@@ -10,7 +10,9 @@ import { evaluateGroup, type ConditionGroup, type ConditionKind } from '@/lib/en
 import type { ContractType } from '@/lib/deriv/contracts';
 import { PROGRESSIONS, PROGRESSION_ORDER, worstCaseStake } from '@/lib/engine/progressions';
 
-const DIGIT_CONTRACTS: { value: ContractType; label: string; barrier: 'none' | 'required' }[] = [
+const TRADE_TYPES: { value: ContractType; label: string; barrier: 'none' | 'required' }[] = [
+  { value: 'CALL', label: 'Rise', barrier: 'none' },
+  { value: 'PUT', label: 'Fall', barrier: 'none' },
   { value: 'DIGITODD', label: 'Odd', barrier: 'none' },
   { value: 'DIGITEVEN', label: 'Even', barrier: 'none' },
   { value: 'DIGITOVER', label: 'Over', barrier: 'required' },
@@ -95,8 +97,13 @@ export default function BuilderPage() {
   // on real data before a single order is placed.
   const gateEval = useMemo(() => {
     if (!draft) return null;
-    return evaluateGroup(draft.entry, { digits: s.digits, symbol: s.activeSymbol, pipSize: s.pipSize });
-  }, [draft, s.digits, s.activeSymbol, s.pipSize]);
+    return evaluateGroup(draft.entry, {
+      digits: s.digits,
+      prices: s.quotes.map((q) => q.price),
+      symbol: s.activeSymbol,
+      pipSize: s.pipSize,
+    });
+  }, [draft, s.digits, s.activeSymbol, s.pipSize, s.quotes]);
 
   const patch = (p: Partial<Strategy>) => {
     if (!draft) return;
@@ -182,7 +189,7 @@ export default function BuilderPage() {
     }
   }
 
-  const contractMeta = DIGIT_CONTRACTS.find((c) => c.value === draft?.contractType);
+  const contractMeta = TRADE_TYPES.find((c) => c.value === draft?.contractType);
   const progression = draft?.progression ?? { kind: 'flat' as const, unit: draft?.stake ?? 0.35, multiplier: 2 };
   const progInfo = PROGRESSIONS[progression.kind];
 
@@ -317,7 +324,7 @@ export default function BuilderPage() {
                   </In>
                   <In label="Trade type">
                     <select value={draft.contractType} onChange={(e) => patch({ contractType: e.target.value as ContractType })}>
-                      {DIGIT_CONTRACTS.map((c) => (
+                      {TRADE_TYPES.map((c) => (
                         <option key={c.value} value={c.value}>
                           {c.label}
                         </option>
@@ -334,6 +341,13 @@ export default function BuilderPage() {
                         onChange={(e) => patch({ barrier: Math.min(9, Math.max(0, Number(e.target.value) || 0)) })}
                       />
                     </In>
+                  )}
+                  {contractMeta && (contractMeta.value === 'CALL' || contractMeta.value === 'PUT') && (
+                    <p className="text-xs leading-relaxed text-faint">
+                      Rise / Fall is a direction contract — no fair-draw probability applies. Deriv quotes the payout at
+                      purchase, and whether that quote is worth taking depends on your entry conditions. The Signals tab
+                      computes expected value from live quotes.
+                    </p>
                   )}
                   <In label="Duration">
                     <div className="flex gap-1.5">
@@ -603,7 +617,7 @@ function ToolButton({
 /* ------------------------------------------------------------- toolbox */
 
 function Toolbox({ onAdd, onAddGroup }: { onAdd: (kind: ConditionKind) => void; onAddGroup: () => void }) {
-  const [open, setOpen] = useState<Record<string, boolean>>({ digits: true, history: true, flow: true, logic: true });
+  const [open, setOpen] = useState<Record<string, boolean>>({ digits: true, history: true, flow: true, logic: true, indicators: true });
   const cats = Object.keys(CATEGORY_META) as (keyof typeof CATEGORY_META)[];
 
   return (

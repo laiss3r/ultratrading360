@@ -109,6 +109,7 @@
   color-scheme: light;
   --dt-header-h: 56px;
   --dt-footer-h: 36px;
+  --dt-bottomnav-h: 54px;
   --dt-runpanel-w: 366px;
   --dt-toolbox-w: 232px;
 }
@@ -708,7 +709,65 @@ textarea::placeholder {
   }
 }
 
+/* Phone-only bottom tab bar. It sits directly above the footer strip so the
+   clock and the connection status stay visible — a trader should never have to
+   guess whether the feed under them is live. */
+.dt-bottomnav {
+  display: none;
+}
+
 @media (max-width: 767.98px) {
+  .dt-bottomnav {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: calc(var(--dt-footer-h) + env(safe-area-inset-bottom, 0px));
+    height: var(--dt-bottomnav-h);
+    background: var(--color-general-main-1);
+    border-top: 1px solid var(--color-border-normal);
+    z-index: 60;
+  }
+  .dt-bottomnav__item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    min-height: 44px;
+    font-size: 10.5px;
+    line-height: 1.2;
+    color: var(--color-less-prominent);
+    border-top: 2px solid transparent;
+  }
+  .dt-bottomnav__item.is-active {
+    color: var(--color-coral);
+    border-top-color: var(--color-coral);
+    font-weight: 600;
+  }
+  .dt-tabs {
+    display: none;
+  }
+  .dt-footer {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .dt-body {
+    padding-bottom: calc(var(--dt-bottomnav-h) + env(safe-area-inset-bottom, 0px));
+  }
+  .dt-runpanel {
+    bottom: calc(var(--dt-footer-h) + var(--dt-bottomnav-h) + env(safe-area-inset-bottom, 0px));
+  }
+  .dt-runpanel-backdrop {
+    inset: var(--dt-header-h) 0 calc(var(--dt-footer-h) + var(--dt-bottomnav-h) + env(safe-area-inset-bottom, 0px)) 0;
+  }
+
+  /* The phone footer keeps only what a trader needs at a glance: the clock and
+     the connection status. Fullscreen and theme are one tap away in the header. */
+  .dt-footer__btn[data-mobile-hide='true'] {
+    display: none;
+  }
+
   .dt-card table,
   .dt-runpanel table {
     display: block;

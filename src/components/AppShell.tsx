@@ -4,6 +4,7 @@ import { useEffect, type ReactNode } from 'react';
 import { useApp } from '@/state/store';
 import { AppHeader } from './Header';
 import { AppFooter } from './Footer';
+import { BottomNav } from './BottomNav';
 import { RunPanel } from './RunPanel';
 import { QuickStrategy } from './QuickStrategy';
 
@@ -53,6 +54,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <main className="dt-main">{hydrated ? children : <Restoring />}</main>
         <RunPanel />
       </div>
+      <BottomNav />
       <AppFooter />
       <QuickStrategy />
     </div>

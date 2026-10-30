@@ -316,7 +316,7 @@ export default function DashboardPage() {
               <Badge tone={s.dataSource === 'deriv_live' ? 'profit' : 'info'}>{SOURCE_LABEL[s.dataSource]}</Badge>
             </span>
           }
-          subtitle="Price is the broker quote for live data, or the deterministic simulator's output in SIM mode. The digit is extracted using the instrument's own pip_size."
+          subtitle="Price and digit come straight from the Deriv tick feed. The digit is extracted using the instrument's own pip_size; if the feed is not connected, nothing is shown instead of a substitute price."
           right={
             <span className="flex items-center gap-2">
               {s.marketLoading && <span className="text-xxs text-less-prominent">loading…</span>}
