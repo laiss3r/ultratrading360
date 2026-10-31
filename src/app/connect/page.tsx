@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { AlertTriangle, ExternalLink, KeyRound, LogOut, ShieldCheck, Unplug } from 'lucide-react';
+import { AlertTriangle, Check, Copy, ExternalLink, KeyRound, LogOut, ShieldCheck, Unplug } from 'lucide-react';
 import { Badge, Banner, Button, Card, Field, Toggle } from '@/components/ui';
 import { useApp } from '@/state/store';
 import { ago, MODE_LABEL } from '@/lib/format';
@@ -52,10 +52,27 @@ export default function ConnectPage() {
           <div className="space-y-3">
             {s.oauthConfigured ? (
               <>
-                <Banner tone="success">
-                  An OAuth client is configured on the server. Redirect URI in use:{' '}
-                  <code className="num text-xxs">{s.redirectUri || '—'}</code>
-                </Banner>
+                <div className="rounded border border-line bg-section-1 p-2.5">
+                  <div className="dt-section-title mb-1">Redirect URI this site sends to Deriv</div>
+                  <div className="flex items-center gap-2">
+                    <code className="num min-w-0 flex-1 break-all text-xxs leading-snug text-prominent">
+                      {s.redirectUri || '—'}
+                    </code>
+                    <CopyRedirectUri value={s.redirectUri} />
+                  </div>
+                  <p className="mt-1.5 text-xxs leading-relaxed text-less-prominent">
+                    OAuth 2.0 matches this string exactly — scheme, host, path and trailing slash all count. If pressing
+                    &ldquo;Continue with Deriv&rdquo; lands on <code className="num">home.deriv.com/dashboard/error</code> with{' '}
+                    <code className="num">error=invalid_request</code> and a note that the <code className="num">redirect_uri</code>{' '}
+                    does not match, then Deriv accepted the client id but your app&apos;s redirect-URL list holds a different
+                    string. Fix: copy the URL above, open{' '}
+                    <a className="text-blue underline" href="https://developers.deriv.com/dashboard/" target="_blank" rel="noreferrer">
+                      developers.deriv.com/dashboard
+                    </a>
+                    , edit your application, paste it into the redirect URLs (keep any localhost entry you use for
+                    development), save, wait a minute, then press Continue again.
+                  </p>
+                </div>
                 <div className="flex gap-2">
                   <Button variant="primary" size="lg" className="flex-1" disabled={s.busy === 'oauth'} onClick={() => void s.startOAuth(false)}>
                     <ExternalLink className="h-4 w-4" /> Continue with Deriv
@@ -287,5 +304,32 @@ function KV({ label, value, tone }: { label: string; value: string; tone?: 'loss
         {value}
       </div>
     </div>
+  );
+}
+
+/**
+ * One-tap copy of the exact redirect URI, because the single most common OAuth
+ * failure on Deriv is a registered redirect URL that differs from the one the
+ * client sends by a slash or a path segment — and retyping it invites exactly
+ * that mistake.
+ */
+function CopyRedirectUri({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      disabled={!value}
+      title="Copy the redirect URI so you can paste it into your Deriv app registration"
+      onClick={() => {
+        void navigator.clipboard?.writeText(value).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1600);
+        });
+      }}
+    >
+      {copied ? <Check className="h-3.5 w-3.5" aria-hidden /> : <Copy className="h-3.5 w-3.5" aria-hidden />}
+      {copied ? 'Copied' : 'Copy'}
+    </Button>
   );
 }
