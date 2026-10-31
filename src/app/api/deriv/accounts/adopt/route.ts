@@ -35,7 +35,13 @@ export async function POST(req: Request) {
   }
 
   const accounts = adoptedRowsToAccounts(rows);
-  const primary = accounts.find((a) => a.is_virtual === 1) ?? accounts[0];
+  // Keep whichever primary the session already trades with (the created Options
+  // row), otherwise prefer an Options row, otherwise the first virtual classic row.
+  const primary =
+    accounts.find((a) => a.account_loginid === session.loginid) ??
+    accounts.find((a) => /^(DOT|ROT)/.test(a.account_loginid)) ??
+    accounts.find((a) => a.is_virtual === 1) ??
+    accounts[0];
   const scopes =
     Array.isArray(body.scopes) && body.scopes.every((x) => typeof x === 'string')
       ? (body.scopes as string[])
@@ -44,6 +50,7 @@ export async function POST(req: Request) {
     ...buildSession(session.kind, primary, scopes, session.expiresAt),
     needsOptionsAccount: undefined,
     accountsSource: 'classic_browser' as const,
+    accountRows: accounts,
     accessToken: session.accessToken,
   };
   const res = NextResponse.json({

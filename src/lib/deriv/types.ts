@@ -150,6 +150,8 @@ export interface AuthSession {
    * accounts are never created automatically.
    */
   needsOptionsAccount?: boolean;
+  /** Account rows the switcher shows (created Options row and/or adopted classic rows). */
+  accountRows?: AccountInfo[];
   /** Which Deriv path produced the account rows: new REST listing or legacy socket authorize. */
   accountsSource?: 'options_rest' | 'classic_ws' | 'classic_browser';
 }

@@ -30,7 +30,19 @@ export async function GET() {
       ({ accounts } = await validateAccountsForToken(session.accessToken, session.kind));
     } catch (e) {
       if ((e as { code?: string }).code === 'no_accounts') {
-        return NextResponse.json({ ok: true, accounts: [] });
+        // Keep the switcher populated with the rows this session already proved
+        // (created Options row / adopted classic rows) instead of wiping them.
+        const rows = session.accountRows ?? [];
+        return NextResponse.json({
+          ok: true,
+          accounts: rows.map((a) => ({
+            loginid: a.account_loginid,
+            currency: a.currency,
+            balance: Number(a.balance ?? 0),
+            isVirtual: a.is_virtual === 1 || /^VRT/i.test(a.account_loginid ?? ''),
+            accountType: a.account_type ?? null,
+          })),
+        });
       }
       throw e;
     }

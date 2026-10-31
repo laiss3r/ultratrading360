@@ -120,6 +120,7 @@ export async function POST(req: Request) {
     : {
         ...buildSession('oauth', primary as AccountInfo, scopes, expiresAt),
         accountsSource: source,
+        accountRows: accounts,
         accessToken: token.accessToken,
       };
 
@@ -141,8 +142,9 @@ export async function POST(req: Request) {
     path: '/',
     maxAge: sessionExpirySeconds(session),
   });
-  if (noAccounts) {
-    // Permit exactly one browser-side classic discovery run (120s, single-use).
+  {
+    // Permit exactly one browser-side classic discovery run (120s, single-use) on
+    // every sign-in: classic Real/Demo rows are what every Deriv client shows.
     res.cookies.set(HANDOFF_COOKIE, signValue('1'), {
       httpOnly: true,
       secure: redirectUri.startsWith('https://'),

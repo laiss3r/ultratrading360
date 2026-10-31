@@ -52,7 +52,7 @@ export async function POST(req: Request) {
     // stale cookie cannot outlive a revoked token by much.
     const session = noAccounts
       ? { ...buildNoAccountsSession('pat', null), accessToken: raw.trim() }
-      : { ...buildSession('pat', primary as AccountInfo, scopes, null), accountsSource: source, accessToken: raw.trim() };
+      : { ...buildSession('pat', primary as AccountInfo, scopes, null), accountsSource: source, accountRows: accounts, accessToken: raw.trim() };
 
     const res = NextResponse.json({
       ok: true,
@@ -74,7 +74,7 @@ export async function POST(req: Request) {
       path: '/',
       maxAge: sessionExpirySeconds(session),
     });
-    if (noAccounts) {
+    {
       res.cookies.set(HANDOFF_COOKIE, signValue('1'), {
         httpOnly: true,
         secure: true,

@@ -52,9 +52,10 @@ export async function GET(req: Request) {
     try {
       ({ accounts } = await validateAccountsForToken(session.accessToken, session.kind));
     } catch (e) {
-      // A session flagged as waiting for an Options account stays authenticated:
-      // the empty listing is exactly the state it was created in.
-      if (session.needsOptionsAccount && (e as { code?: string }).code === 'no_accounts') {
+      // An authenticated token whose profile lists nothing on the new platform is a
+      // known Deriv state, not a dead credential: keep the session exactly as stored
+      // (this used to 401 here and log signed-in users out on every refresh).
+      if ((e as { code?: string }).code === 'no_accounts') {
         return NextResponse.json({ authenticated: true, session: publicSession(session), accounts: [] });
       }
       throw e;

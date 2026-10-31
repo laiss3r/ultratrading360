@@ -50,7 +50,13 @@ function CallbackInner() {
       : null;
 
   useEffect(() => {
-    if (urlFailure !== null || error || !code || !state) return;
+    // A reload or revisit of this URL after the code was consumed has nothing left
+    // to exchange. If a valid session already exists, go straight to the dashboard
+    // instead of showing the scary state_expired card ("keeps logging out").
+    if (urlFailure !== null || error || !code || !state) {
+      if (useApp.getState().session) router.replace('/');
+      return;
+    }
     if (fired.current) return;
     fired.current = true;
 
@@ -65,6 +71,10 @@ function CallbackInner() {
         });
         const j = await r.json();
         if (!r.ok || !j.ok) {
+          if (useApp.getState().session) {
+            router.replace('/');
+            return;
+          }
           setExchange({
             status: 'error',
             message: j.message ?? `Sign-in failed (HTTP ${r.status}).`,
@@ -74,7 +84,9 @@ function CallbackInner() {
           return;
         }
         let landed = (j.accounts ?? []) as Array<{ loginid: string; currency: string; balance: number; isVirtual: boolean }>;
-        if (landed.length === 0) {
+        // One classic discovery run per sign-in (single-use marker): classic
+        // Real/Demo rows with balances are what every Deriv client shows.
+        if ((j.session?.accountsSource ?? '') !== 'classic_browser') {
           setExchange({ status: 'ok', message: 'Reading your classic Deriv accounts…', detail: null });
           try {
             const h = await fetch('/api/deriv/handoff', { method: 'POST', credentials: 'same-origin' });
@@ -120,8 +132,12 @@ function CallbackInner() {
         });
         s.pushLog('ok', 'OAuth sign-in completed. Token stored server-side in an encrypted httpOnly cookie.');
         await s.refreshSession(false);
-        setTimeout(() => router.replace(landed.length > 0 ? '/' : '/connect'), 1400);
+        setTimeout(() => router.replace(landed.length > 0 ? '/' : '/connect'), 800);
       } catch (e) {
+        if (useApp.getState().session) {
+          router.replace('/');
+          return;
+        }
         setExchange({
           status: 'error',
           message: 'Could not reach the sign-in endpoint.',
@@ -133,9 +149,12 @@ function CallbackInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [error, code, state, router, s]);
 
-  const status = urlFailure ? 'error' : exchange?.status ?? 'working';
-  const message = urlFailure?.message ?? exchange?.message ?? 'Completing Deriv sign-in…';
-  const detail = urlFailure?.detail ?? exchange?.detail ?? null;
+  const rescued = Boolean(urlFailure && s.session);
+  const status = urlFailure ? (rescued ? 'ok' : 'error') : exchange?.status ?? 'working';
+  const message = rescued
+    ? `Already signed in as ${s.session?.loginid ?? 'your Deriv account'}.`
+    : urlFailure?.message ?? exchange?.message ?? 'Completing Deriv sign-in…';
+  const detail = rescued ? null : urlFailure?.detail ?? exchange?.detail ?? null;
 
   const Icon = status === 'ok' ? CheckCircle2 : status === 'error' ? XCircle : Loader2;
 
