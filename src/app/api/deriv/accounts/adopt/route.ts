@@ -34,7 +34,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, message: 'No Deriv session. Sign in first.' }, { status: 401 });
   }
 
-  const accounts = adoptedRowsToAccounts(rows);
+  const merged = new Map((session.accountRows ?? []).map((a) => [a.account_loginid, a]));
+  for (const a of adoptedRowsToAccounts(rows)) merged.set(a.account_loginid, a);
+  const accounts = Array.from(merged.values());
   // Keep whichever primary the session already trades with (the created Options
   // row), otherwise prefer an Options row, otherwise the first virtual classic row.
   const primary =

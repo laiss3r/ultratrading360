@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, LogOut, PlugZap, ShieldAlert, History as HistoryIcon, Wallet } from 'lucide-react';
+import { ChevronDown, LogOut, PlugZap, ShieldAlert, History as HistoryIcon, Wallet, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { useApp } from '@/state/store';
 import { MODE_LABEL } from '@/lib/format';
@@ -13,8 +13,7 @@ import type { AccountMode } from '@/lib/deriv/types';
  * header, showing the active loginid and balance, opening a panel that lists
  * every account on the session.
  *
- * This app has one concept Deriv's own platforms do not — a fully offline
- * Deriv demo and Deriv real. The switcher keeps the
+ * The switcher keeps the
  * two axes visibly separate: the feed selector chooses where prices and orders
  * go, the account list chooses which Deriv loginid is active. Real money is
  * offered only after it has been acknowledged in Risk settings.
@@ -33,6 +32,8 @@ export function AccountSwitcher() {
   const selectAccount = useApp((s) => s.selectAccount);
   const disconnect = useApp((s) => s.disconnect);
   const pushLog = useApp((s) => s.pushLog);
+  const syncBalances = useApp((s) => s.syncBalances);
+  const busy = useApp((s) => s.busy);
 
   useEffect(() => {
     if (!open) return;
@@ -55,15 +56,13 @@ export function AccountSwitcher() {
   const live = dataSource === 'deriv_live';
 
   const chooseMode = async (m: AccountMode) => {
-    if (m === 'deriv_real') {
-      if (!realAcknowledged) {
-        pushLog('warn', 'Real-money mode is locked until you acknowledge it in Risk settings.');
-        return;
-      }
-      if (!session) {
-        pushLog('warn', 'Connect a Deriv account before switching to real-money mode.');
-        return;
-      }
+    if (session) {
+      const target = accounts.find((a) => a.isVirtual === (m === 'deriv_demo'));
+      if (!target) { pushLog('warn', 'No account of this type is available on this session.'); return; }
+      setOpen(false);
+      const result = await selectAccount(target.loginid);
+      if (!result.ok) pushLog('error', result.message);
+      return;
     }
     await setSettings({ mode: m });
     await applyMode(m);
@@ -152,10 +151,16 @@ export function AccountSwitcher() {
                       type="button"
                       role="menuitemradio"
                       aria-checked={a.loginid === session.loginid}
-                      onClick={async () => {
-                        const r = await selectAccount(a.loginid);
-                        if (!r.ok) pushLog('error', r.message);
+                      disabled={busy === 'switch-account'}
+                      onClick={() => {
+                        // Close the menu the instant the user chooses — the switch itself
+                        // (server select + market rebind) continues in the background and
+                        // must never leave the dropdown sitting open on a slow network.
                         setOpen(false);
+                        void (async () => {
+                          const r = await selectAccount(a.loginid);
+                          if (!r.ok) pushLog('error', r.message);
+                        })();
                       }}
                       className={cn(
                         'flex items-center justify-between gap-2 rounded px-2.5 py-1.5 text-left transition-colors',
@@ -180,6 +185,21 @@ export function AccountSwitcher() {
           <div className="p-2">
             <MenuLink href="/risk" icon={<ShieldAlert size={13} />} label="Risk settings" onClick={() => setOpen(false)} />
             <MenuLink href="/history" icon={<HistoryIcon size={13} />} label="Trade history" onClick={() => setOpen(false)} />
+            {session && (
+              <button
+                type="button"
+                role="menuitem"
+                disabled={busy === 'sync-balances'}
+                onClick={async () => {
+                  const r = await syncBalances();
+                  if (!r.ok) pushLog('warn', r.message);
+                }}
+                className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs text-general transition-colors hover:bg-state-hover disabled:opacity-50"
+                title="Re-read live balances from Deriv's classic socket (one-shot, browser-side)"
+              >
+                <RefreshCw size={13} /> {busy === 'sync-balances' ? 'Syncing…' : 'Sync balances'}
+              </button>
+            )}
             <MenuLink href="/connect" icon={<PlugZap size={13} />} label={session ? 'Connection details' : 'Connect account'} onClick={() => setOpen(false)} />
             {session && (
               <button

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { classifyRevalidation } from '@/lib/deriv/auth';
 import { cookies } from 'next/headers';
 import {
   decryptSession,
@@ -52,20 +53,28 @@ export async function GET(req: Request) {
     try {
       ({ accounts } = await validateAccountsForToken(session.accessToken, session.kind));
     } catch (e) {
-      // An authenticated token whose profile lists nothing on the new platform is a
-      // known Deriv state, not a dead credential: keep the session exactly as stored
-      // (this used to 401 here and log signed-in users out on every refresh).
-      if ((e as { code?: string }).code === 'no_accounts') {
-        return NextResponse.json({ authenticated: true, session: publicSession(session), accounts: [] });
+      const verdict = classifyRevalidation((e as { code?: string }).code ?? '');
+      if (verdict !== 'dead') {
+        // empty: known Deriv state for this profile generation; transient: a network
+        // or HTTP blip between us and Deriv. Neither may log a signed-in user out -
+        // that was the mobile navigation/logout loop. Transient keeps the session but
+        // flags it stale so the client retries in the background.
+        return NextResponse.json({
+          authenticated: true,
+          session: publicSession(session),
+          accounts: [],
+          stale: verdict === 'transient',
+        });
       }
       throw e;
     }
-    const current = accounts.find((a) => a.account_loginid === session.loginid) ?? accounts[0];
+    const current = accounts.find((a) => a.account_loginid === session.loginid);
+    if (!current) return NextResponse.json({ authenticated: true, session: publicSession(session), stale: true });
     const updated: StoredSession = {
       ...session,
       balance: Number(current.balance ?? session.balance),
       currency: current.currency ?? session.currency,
-      isVirtual: current.is_virtual === 1 || session.isVirtual,
+      isVirtual: current.is_virtual === 1,
       needsOptionsAccount: undefined,
     };
     const res = NextResponse.json({ authenticated: true, session: publicSession(updated) });

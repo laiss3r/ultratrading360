@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { decryptSession, SESSION_COOKIE } from '@/lib/oauth/session';
-import { DerivAuthError, getSocketOtp } from '@/lib/deriv/auth';
+import { DerivAuthError, getSocketOtp, validateAccountsForToken } from '@/lib/deriv/auth';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -47,7 +47,20 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: 'missing_loginid', message: 'No account loginid supplied.' }, { status: 400 });
   }
 
-  const isVirtual = /^VRT/i.test(target) || session.isVirtual;
+  if (target !== session.loginid) {
+    return NextResponse.json({ ok: false, error: 'account_mismatch', message: 'Select this account before requesting its socket.' }, { status: 409 });
+  }
+  // Browser-discovered rows are display metadata, never trading authority.
+  // Re-read the account identity from Deriv before applying real-money gates.
+  let verified;
+  try {
+    const { accounts } = await validateAccountsForToken(session.accessToken, session.kind);
+    verified = accounts.find((a) => a.account_loginid === target);
+  } catch {
+    return NextResponse.json({ ok: false, error: 'account_verification_failed', message: 'Could not verify the selected trading account with Deriv.' }, { status: 502 });
+  }
+  if (!verified) return NextResponse.json({ ok: false, error: 'options_account_required', message: 'This classic account is available for viewing only; Deriv must expose an Options account before it can trade via OTP.' }, { status: 409 });
+  const isVirtual = verified.is_virtual === 1;
   if (!isVirtual && body.allowReal !== true) {
     return NextResponse.json(
       {

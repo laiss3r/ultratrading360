@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { adoptedRowsToAccounts, buildNoAccountsSession, DerivAuthError, ensureOptionsAccount, validateAccountsForToken } from './auth';
+import { adoptedRowsToAccounts, buildNoAccountsSession, classifyRevalidation, DerivAuthError, ensureOptionsAccount, validateAccountsForToken } from './auth';
 import { sanitizeAdoptedAccounts } from './authorizeMap';
 import { authorizeViaSocket, classicWsUrl } from './wsAuthorize';
 
@@ -65,6 +65,21 @@ describe('validateAccountsForToken', () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 401, json: async () => null })));
     const err = await validateAccountsForToken('a-valid-looking-token', 'oauth').catch((e) => e);
     expect((err as DerivAuthError).code).toBe('invalid_token');
+  });
+});
+
+describe('classifyRevalidation', () => {
+  it('treats only definitive rejections as dead', () => {
+    expect(classifyRevalidation('invalid_token')).toBe('dead');
+    expect(classifyRevalidation('malformed_token')).toBe('dead');
+    expect(classifyRevalidation('empty_token')).toBe('dead');
+  });
+  it('keeps empty listings separate from transient faults', () => {
+    expect(classifyRevalidation('no_accounts')).toBe('empty');
+    expect(classifyRevalidation('network')).toBe('transient');
+    expect(classifyRevalidation('http_error')).toBe('transient');
+    expect(classifyRevalidation('endpoint_not_found')).toBe('transient');
+    expect(classifyRevalidation('')).toBe('transient');
   });
 });
 

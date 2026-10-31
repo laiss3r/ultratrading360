@@ -176,6 +176,19 @@ export function adoptedRowsToAccounts(rows: AdoptedRow[]): AccountInfo[] {
 }
 
 /**
+ * How a revalidation failure should be treated by the session route.
+ *  - dead: Deriv definitively rejected the credential (expired/revoked/garbage).
+ *  - empty: credential is fine, the profile simply lists no accounts.
+ *  - transient: network/HTTP/endpoint trouble between us and Deriv - never a
+ *    reason to log a signed-in user out (the classic mobile-navigation killer).
+ */
+export function classifyRevalidation(code: string): 'dead' | 'empty' | 'transient' {
+  if (code === 'invalid_token' || code === 'empty_token' || code === 'malformed_token') return 'dead';
+  if (code === 'no_accounts') return 'empty';
+  return 'transient';
+}
+
+/**
  * Session for a token that Deriv authenticated but whose profile holds no Options
  * trading account yet. Placeholder identity, flagged so the UI offers the explicit
  * creation step; carries no token of its own — the caller attaches the real one.

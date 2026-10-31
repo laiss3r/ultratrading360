@@ -26,7 +26,8 @@ const BROWSER_HEADERS = {
 };
 
 export function classicWsUrl(host: string, appId: string): string {
-  return `wss://${host}/websockets/v3?app_id=${encodeURIComponent(appId)}&l=EN&brand=deriv`;
+  const base = host.includes('://') ? host : `wss://${host}`; // scheme override = test stubs only
+  return `${base}/websockets/v3?app_id=${encodeURIComponent(appId)}&l=EN&brand=deriv`;
 }
 
 function attempt(url: string, token: string, timeoutMs: number): Promise<AuthorizeResult | null> {

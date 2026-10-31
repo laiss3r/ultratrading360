@@ -96,16 +96,26 @@ export class DerivProvider implements MarketProvider {
 
   constructor(
     public readonly mode: 'deriv_demo' | 'deriv_real',
-    opts: { authenticatedUrl?: string; onStatus?: (s: string) => void } = {},
+    opts: { authenticatedUrl?: string; urlFactory?: () => Promise<string>; onStatus?: (s: string) => void } = {},
   ) {
     this.client = new DerivClient({
       authenticatedUrl: opts.authenticatedUrl,
+      urlFactory: opts.urlFactory,
       requestTimeoutMs: 15000,
       onStatusChange: opts.onStatus ? (s) => opts.onStatus!(s) : undefined,
     });
     this.marketSvc = new MarketDataService(this.client);
     this.contractSvc = new ContractService(this.client);
     this.tradingSvc = new TradingService(this.client, this.contractSvc);
+  }
+
+  async streamBalance(onBalance: (balance: number, currency: string) => void): Promise<void> {
+    const handle = (m: import('@/lib/deriv/types').DerivMessage) => {
+      const b = m.balance as { balance?: number; currency?: string } | undefined;
+      if (b && typeof b.balance === 'number' && typeof b.currency === 'string') onBalance(b.balance, b.currency);
+    };
+    const first = await this.client.subscribe({ balance: 1 }, handle, 'account-balance');
+    handle(first);
   }
 
   get connectionStatus() {

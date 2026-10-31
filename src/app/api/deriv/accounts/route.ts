@@ -13,7 +13,7 @@ export const revalidate = 0;
  * balance and virtual/real flag — and explicitly labels which account is which, because the
  * UI must never let a demo balance be mistaken for a real one.
  */
-export async function GET() {
+export async function GET(req: Request) {
   const store = await cookies();
   const raw = store.get(SESSION_COOKIE)?.value;
   if (!raw) {
@@ -22,6 +22,12 @@ export async function GET() {
   const session = decryptSession(raw);
   if (!session) {
     return NextResponse.json({ ok: false, error: 'session_unreadable', message: 'Session could not be read. Reconnect.' }, { status: 401 });
+  }
+
+  if (new URL(req.url).searchParams.get('cached') === '1') {
+    return NextResponse.json({ ok: true, cached: true, accounts: (session.accountRows ?? []).map((a) => ({
+      loginid: a.account_loginid, currency: a.currency, balance: Number(a.balance ?? 0), isVirtual: a.is_virtual === 1,
+    })) });
   }
 
   try {
@@ -46,9 +52,11 @@ export async function GET() {
       }
       throw e;
     }
+    const merged = new Map((session.accountRows ?? []).map((a) => [a.account_loginid, a]));
+    for (const a of accounts) merged.set(a.account_loginid, a);
     return NextResponse.json({
       ok: true,
-      accounts: accounts.map((a) => ({
+      accounts: Array.from(merged.values()).map((a) => ({
         loginid: a.account_loginid,
         currency: a.currency,
         balance: Number(a.balance ?? 0),

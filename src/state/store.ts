@@ -1,6 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
+import { runClassicDiscovery } from '@/lib/deriv/browserLegacyWs';
 import type { AccountMode, ActiveSymbol, AuthSession } from '@/lib/deriv/types';
 import { DERIV_APP_ID } from '@/lib/deriv/config';
 import { DerivProvider, type MarketProvider, type Quote } from '@/lib/engine/provider';
@@ -123,6 +124,17 @@ function entropy(digits: number[]): number {
   return h / Math.log2(10); // normalised to 0..1
 }
 
+const PREF_LOGINID = 'ut_pref_loginid';
+let upkeepStarted = false;
+let staleRetry: ReturnType<typeof setTimeout> | null = null;
+function scheduleStaleRetry() {
+  if (staleRetry) return;
+  staleRetry = setTimeout(() => {
+    staleRetry = null;
+    void useApp.getState().refreshSession(false);
+  }, 30000);
+}
+
 export const useApp = create<State & Actions>()((set, get) => ({
   hydrated: false,
   settings: DEFAULT_SETTINGS,
@@ -179,8 +191,21 @@ export const useApp = create<State & Actions>()((set, get) => ({
     });
     get().pushLog('info', 'Local store hydrated from IndexedDB.');
     await get().loadConfig();
-    await get().refreshSession(false);
-    await get().applyMode(settings.mode, true);
+    // Boot reads the cookie only (no Deriv round-trip): a slow or failed Deriv call
+    // must never gate navigation or look like a logout. Revalidation happens in the
+    // background upkeep loop instead.
+    await get().refreshSession(false, { revalidate: false });
+    get().startUpkeep();
+    // Restore the account the user last chose, across routes, reloads and tabs.
+    const pref = typeof localStorage !== 'undefined' ? localStorage.getItem(PREF_LOGINID) : null;
+    const chosen = pref && get().accounts.some((a) => a.loginid === pref) ? pref : null;
+    if (chosen && get().session && chosen !== get().session?.loginid) {
+      await get().selectAccount(chosen, { silent: true });
+    }
+    const active = get().session?.loginid ?? null;
+    const activeRow = active ? get().accounts.find((a) => a.loginid === active) : null;
+    const mode = activeRow ? (activeRow.isVirtual ? 'deriv_demo' : 'deriv_real') : settings.mode;
+    await get().applyMode(mode, true);
   },
 
   async loadConfig() {
@@ -231,20 +256,58 @@ export const useApp = create<State & Actions>()((set, get) => ({
 
   /* ---------------------------------------------------------- connection */
 
-  async refreshSession(notify = true) {
+  startUpkeep() {
+    if (upkeepStarted || typeof window === 'undefined') return;
+    upkeepStarted = true;
+    const tick = () => void useApp.getState().refreshSession(false);
+    window.setInterval(tick, 5 * 60 * 1000);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') tick();
+    });
+    window.addEventListener('online', tick);
+    window.addEventListener('storage', (event) => {
+      if (event.key !== PREF_LOGINID) return;
+      const previous = useApp.getState().session?.loginid;
+      void useApp.getState().refreshSession(false, { revalidate: false }).then(() => {
+        const current = useApp.getState();
+        if (current.session && current.session.loginid !== previous) {
+          void current.applyMode(current.session.isVirtual ? 'deriv_demo' : 'deriv_real');
+        }
+      });
+    });
+  },
+
+  async refreshSession(notify = true, opts?: { revalidate?: boolean }) {
     try {
-      const r = await fetch('/api/deriv/session?refresh=1', { cache: 'no-store' });
+      const r = await fetch(opts?.revalidate === false ? '/api/deriv/session' : '/api/deriv/session?refresh=1', {
+        cache: 'no-store',
+      });
       const j = await r.json();
       if (j.authenticated && j.session) {
         const had = get().session;
         set({ session: j.session as AuthSession });
         if (notify) get().pushLog('ok', `Session active: ${j.session.loginid} (${j.session.currency})`);
         if (!had || had.loginid !== j.session.loginid) get().rebaseToAccount();
-      } else {
-        set({ session: null });
-        if (notify && j.reason) get().pushLog('warn', `Session not active: ${j.reason}`);
+        if (j.stale) {
+          // Deriv was unreachable during revalidation: stay signed in, retry soon.
+          get().pushLog('info', 'Deriv could not be reached to revalidate; staying signed in and retrying.');
+          scheduleStaleRetry();
+        }
+      } else if (j.authenticated === false && (r.ok || r.status === 401)) {
+        get().stopBot('session ended');
+        get().provider?.disconnect();
+        set({ session: null, accounts: [] });
+        if (notify && j.reason) {
+          get().pushLog(
+            'warn',
+            j.reason === 'expired'
+              ? 'Your Deriv session expired or was revoked - sign in again.'
+              : `Session not active: ${j.reason}`,
+          );
+        }
       }
-      const a = await fetch('/api/deriv/accounts', { cache: 'no-store' });
+      if (j.authenticated !== true) return;
+      const a = await fetch(opts?.revalidate === false ? '/api/deriv/accounts?cached=1' : '/api/deriv/accounts', { cache: 'no-store' });
       if (a.ok) {
         const aj = await a.json();
         if (aj.ok) set({ accounts: aj.accounts as AccountSummary[] });
@@ -338,23 +401,77 @@ export const useApp = create<State & Actions>()((set, get) => ({
       /* best effort */
     }
     set({ session: null, accounts: [] });
+    try { localStorage.removeItem(PREF_LOGINID); } catch { /* private mode */ }
     get().pushLog('warn', 'Disconnected. The local session cookie was cleared; revoke the token at Deriv if you want it dead server-side.');
     await get().applyMode('deriv_demo', false);
   },
 
-  /** Switch the active account (demo vs real). Real requires acknowledgement. */
-  async selectAccount(loginid: string): Promise<{ ok: boolean; message: string }> {
+  /** Switch the active account (demo vs real). Real requires acknowledgement.
+   *  The choice is persisted server-side (session cookie) AND as a local pref, so
+   *  every route, reload and tab agrees on the active account. */
+  async selectAccount(loginid: string, opts?: { silent?: boolean }): Promise<{ ok: boolean; message: string }> {
+    if (['starting', 'running', 'paused', 'stopping'].includes(get().botState)) return { ok: false, message: 'Stop the bot before switching accounts.' };
     const acct = get().accounts.find((a) => a.loginid === loginid);
-    if (!acct) return { ok: false, message: 'Unknown account.' };
-    if (!acct.isVirtual && !get().settings.realTradingAcknowledged) {
-      return {
-        ok: false,
-        message: 'Real-money trading is not acknowledged. Enable it in Risk settings first.',
-      };
+    if (!acct) return { ok: false, message: 'Unknown account. Sync balances or sign in again.' };
+    if (get().busy) return { ok: false, message: 'Another account operation is in progress.' };
+    set({ busy: 'switch-account' });
+    try {
+    // Viewing a real account is not permission to place real-money orders.
+    // Execution remains gated by the socket and risk controls.
+    const r = await fetch('/api/deriv/session/select', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ loginid }),
+    });
+    const j = (await r.json().catch(() => null)) as {
+      ok?: boolean;
+      message?: string;
+      session?: AuthSession;
+      accounts?: AccountSummary[];
+    } | null;
+    if (!r.ok || !j?.ok || !j.session) {
+      const msg = j?.message ?? `Switch failed (HTTP ${r.status}).`;
+      if (!opts?.silent) get().pushLog('error', msg);
+      return { ok: false, message: msg };
     }
+    get().provider?.disconnect();
+    set({ session: j.session, accounts: (j.accounts ?? get().accounts) as AccountSummary[] });
+    try {
+      localStorage.setItem(PREF_LOGINID, loginid);
+    } catch {
+      /* private mode: pref is best-effort */
+    }
+    await get().setSettings({ mode: acct.isVirtual ? 'deriv_demo' : 'deriv_real' });
     await get().applyMode(acct.isVirtual ? 'deriv_demo' : 'deriv_real', false);
     get().rebaseToAccount();
+    if (!opts?.silent) {
+      get().pushLog('ok', `Active account: ${loginid} (${acct.balance.toFixed(2)} ${acct.currency}).`);
+    }
     return { ok: true, message: `Switched to ${loginid}` };
+    } catch (e) {
+      return { ok: false, message: `Account switch failed: ${(e as Error).message}` };
+    } finally {
+      set({ busy: null });
+    }
+  },
+
+  /** Re-read live classic balances via the one-shot browser discovery run. */
+  async syncBalances(): Promise<{ ok: boolean; message: string }> {
+    set({ busy: 'sync-balances' });
+    try {
+      await fetch('/api/deriv/handoff/refresh', { method: 'POST', credentials: 'same-origin' });
+      const res = await runClassicDiscovery();
+      if (res.ok && res.accounts.length > 0) {
+        set({ accounts: res.accounts as AccountSummary[] });
+        await get().refreshSession(false, { revalidate: false });
+        get().pushLog('ok', `Balances synced for ${res.accounts.length} account(s) from Deriv.`);
+        return { ok: true, message: res.message };
+      }
+      get().pushLog('warn', `Balance sync: ${res.message}`);
+      return { ok: false, message: res.message };
+    } finally {
+      set({ busy: null });
+    }
   },
 
   /* ---------------------------------------------------------- market data */
@@ -393,7 +510,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
 
   /** Exchange the server-held token for an OTP socket so the bot can trade. */
   async attachTradingSocket(mode: 'deriv_demo' | 'deriv_real'): Promise<void> {
-    const loginid = get().accounts.find((a) => (mode === 'deriv_real' ? !a.isVirtual : a.isVirtual))?.loginid ?? get().session?.loginid;
+    const loginid = get().session?.loginid;
     if (!loginid) return;
     try {
       const r = await fetch('/api/deriv/socket', {
@@ -406,12 +523,34 @@ export const useApp = create<State & Actions>()((set, get) => ({
         get().pushLog('warn', `Trading socket unavailable: ${j.message ?? r.status}. Market data still works; trading stays disabled.`);
         return;
       }
+      if (get().session?.loginid !== loginid) return;
       const prev = get().provider;
       prev?.disconnect();
-      const authed = new DerivProvider(mode, { authenticatedUrl: j.url ?? undefined, onStatus: (s) => set({ connectionStatus: s }) });
+      let firstUrl: string | null = j.url ?? null;
+      const authed = new DerivProvider(mode, {
+        urlFactory: async () => {
+          if (get().session?.loginid !== loginid) throw new Error('Account changed');
+          if (firstUrl) { const url = firstUrl; firstUrl = null; return url; }
+          const response = await fetch('/api/deriv/socket', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ loginid, allowReal: mode === 'deriv_real' && get().settings.realTradingAcknowledged }),
+          });
+          const fresh = await response.json();
+          if (!response.ok || !fresh.url) throw new Error(fresh.message ?? 'Could not renew trading socket');
+          return fresh.url as string;
+        },
+        onStatus: (s) => { if (get().provider === authed) set({ connectionStatus: s }); },
+      });
       set({ provider: authed });
       await authed.connect();
+      if (get().provider !== authed || get().session?.loginid !== loginid) { authed.disconnect(); return; }
       set({ connectionStatus: 'open' });
+      await authed.streamBalance((balance, currency) => {
+        if (get().session?.loginid !== loginid || get().provider !== authed) return;
+        set({ session: { ...get().session!, balance, currency },
+          accounts: get().accounts.map((a) => a.loginid === loginid ? { ...a, balance, currency } : a) });
+      });
+      await get().subscribeTicks(get().activeSymbol);
       get().pushLog('ok', `Authenticated trading socket open for ${loginid} (${j.mode}).`);
     } catch (e) {
       get().pushLog('error', `Trading socket error: ${(e as Error).message}`);
@@ -690,12 +829,14 @@ interface Actions {
   pushLog: (level: LogEntry['level'], text: string) => void;
   clearLog: () => void;
   setSettings: (patch: Partial<AppSettings>) => Promise<void>;
-  refreshSession: (notify?: boolean) => Promise<void>;
+  refreshSession: (notify?: boolean, opts?: { revalidate?: boolean }) => Promise<void>;
   connectWithPat: (token: string) => Promise<{ ok: boolean; message: string }>;
   createOptionsAccount: (accountType: 'demo' | 'real') => Promise<{ ok: boolean; message: string }>;
   startOAuth: (signup?: boolean) => Promise<{ ok: boolean; message: string }>;
   disconnect: () => Promise<void>;
-  selectAccount: (loginid: string) => Promise<{ ok: boolean; message: string }>;
+  selectAccount: (loginid: string, opts?: { silent?: boolean }) => Promise<{ ok: boolean; message: string }>;
+  syncBalances: () => Promise<{ ok: boolean; message: string }>;
+  startUpkeep: () => void;
   applyMode: (mode: AccountMode, initial?: boolean) => Promise<void>;
   attachTradingSocket: (mode: 'deriv_demo' | 'deriv_real') => Promise<void>;
   loadMarket: (initial?: boolean) => Promise<void>;

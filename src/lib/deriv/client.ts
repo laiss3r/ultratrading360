@@ -9,6 +9,8 @@ export interface DerivClientOptions {
   /** Authenticated socket URL (already contains ?otp=...). Overrides `url`. */
   authenticatedUrl?: string;
   origin?: string;
+  /** Fresh OTP URL for each authenticated connection/reconnection. */
+  urlFactory?: () => Promise<string>;
   requestTimeoutMs?: number;
   pingIntervalMs?: number;
   maxReconnectAttempts?: number;
@@ -38,6 +40,8 @@ export class DerivClient {
   private replayable = new Map<string, Record<string, unknown>>();
   private reconnectAttempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private onlineRetryArmed = false;
+
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private intentionallyClosed = false;
   status: ConnectionStatus = 'idle';
@@ -55,7 +59,12 @@ export class DerivClient {
     return this.open();
   }
 
-  private open(): Promise<void> {
+  private async open(): Promise<void> {
+    if (this.intentionallyClosed) return;
+    if (this.opts.urlFactory) {
+      this.opts.authenticatedUrl = await this.opts.urlFactory();
+      if (this.intentionallyClosed) return;
+    }
     return new Promise((resolve, reject) => {
       if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
         resolve();
@@ -112,10 +121,11 @@ export class DerivClient {
 
       ws.onerror = () => {
         this.setStatus('error');
-        if (this.status === 'connecting') reject(new Error('WebSocket error during connect'));
+        reject(new Error('WebSocket connection error'));
       };
 
       ws.onclose = () => {
+        reject(new Error('WebSocket closed before connection completed'));
         this.stopPing();
         this.ws = null;
         this.failAllPending(new Error('WebSocket closed'));
@@ -133,22 +143,43 @@ export class DerivClient {
     const max = this.opts.maxReconnectAttempts ?? 8;
     if (this.reconnectAttempt >= max) {
       this.setStatus('error');
+      // Long outages (airplane mode, dead coverage) exhaust the backoff budget.
+      // Come back immediately when the OS says the network is alive again.
+      if (typeof window !== 'undefined' && !this.onlineRetryArmed) {
+        this.onlineRetryArmed = true;
+        window.addEventListener(
+          'online',
+          () => {
+            this.onlineRetryArmed = false;
+            if (this.intentionallyClosed) return;
+            this.reconnectAttempt = 0;
+            this.open().catch(() => {
+              /* onclose will re-schedule */
+            });
+          },
+          { once: true },
+        );
+      }
       return;
     }
     const base = Math.min(30000, 500 * Math.pow(2, this.reconnectAttempt));
     const delay = base + Math.floor(Math.random() * 250);
     this.reconnectAttempt += 1;
     this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
       this.open().catch(() => {
-        /* onclose will re-schedule */
+        // OTP renewal may fail before a socket exists (so no onclose fires).
+        if (!this.intentionallyClosed && !this.reconnectTimer && !this.ws) this.scheduleReconnect();
       });
     }, delay);
   }
 
   private async replaySubscriptions() {
-    for (const [, req] of this.replayable) {
+    for (const [key, req] of this.replayable) {
       try {
-        this.rawSend(req);
+        const handler = this.subscriptionHandlers.get(key);
+        const id = this.rawSend(req);
+        if (handler) this.subscriptionHandlers.set(String(id), handler);
       } catch {
         /* will be retried on next reconnect */
       }
@@ -236,6 +267,7 @@ export class DerivClient {
     const first = await this.send({ ...request, subscribe: 1 });
     const id = String(first.req_id ?? first.echo_req?.req_id ?? replayKey);
     this.subscriptionHandlers.set(id, onFrame);
+    this.subscriptionHandlers.set(replayKey, onFrame);
     this.replayable.set(replayKey, { ...request, subscribe: 1 });
     return first;
   }

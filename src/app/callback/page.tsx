@@ -5,7 +5,7 @@ import { Suspense, useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Loader2, XCircle } from 'lucide-react';
 import { Banner, Button, Card } from '@/components/ui';
 import { useApp } from '@/state/store';
-import { discoverClassicAccounts } from '@/lib/deriv/browserLegacyWs';
+import { runClassicDiscovery } from '@/lib/deriv/browserLegacyWs';
 
 /**
  * OAuth landing page.
@@ -88,37 +88,10 @@ function CallbackInner() {
         // Real/Demo rows with balances are what every Deriv client shows.
         if ((j.session?.accountsSource ?? '') !== 'classic_browser') {
           setExchange({ status: 'ok', message: 'Reading your classic Deriv accounts…', detail: null });
-          try {
-            const h = await fetch('/api/deriv/handoff', { method: 'POST', credentials: 'same-origin' });
-            const hj = h.ok ? ((await h.json()) as { ok?: boolean; token?: string; hosts?: string[] }) : null;
-            if (hj?.ok && hj.token) {
-              const disc = await discoverClassicAccounts(hj.token, hj.hosts ?? []);
-              // The handed-off token lives only in this scope; dropping the last
-              // reference here is all the cleanup a JS string needs.
-              if (disc && disc.accounts.length > 0) {
-                const ad = await fetch('/api/deriv/accounts/adopt', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  credentials: 'same-origin',
-                  body: JSON.stringify({
-                    accounts: disc.accounts.map((a) => ({
-                      loginid: a.account_loginid,
-                      currency: a.currency,
-                      balance: a.balance ?? 0,
-                      isVirtual: a.is_virtual === 1,
-                    })),
-                    scopes: disc.scopes,
-                  }),
-                });
-                if (ad.ok) {
-                  const aj = (await ad.json()) as { accounts?: typeof landed };
-                  landed = aj.accounts ?? landed;
-                }
-              }
-            }
-          } catch {
-            /* discovery is best-effort; the Connect page covers the remainder */
-          }
+          // The handed-off token lives only inside runClassicDiscovery's scope for a
+          // couple of seconds and is never written to any storage.
+          const disc = await runClassicDiscovery();
+          if (disc.ok && disc.accounts.length > 0) landed = disc.accounts;
         }
         setExchange({
           status: 'ok',

@@ -65,7 +65,8 @@ export async function discoverClassicAccounts(
   for (const host of hosts) {
     const left = deadline - Date.now();
     if (left < 500) break;
-    const url = `wss://${host}/websockets/v3?app_id=${encodeURIComponent(process.env.NEXT_PUBLIC_DERIV_APP_ID ?? '')}&l=EN&brand=deriv`;
+    const base = host.includes('://') ? host : `wss://${host}`; // scheme override = test stubs only
+    const url = `${base}/websockets/v3?app_id=${encodeURIComponent(process.env.NEXT_PUBLIC_DERIV_APP_ID ?? '')}&l=EN&brand=deriv`;
     const payload = await attempt(url, token, left);
     const accounts = accountsFromAuthorizePayload(payload);
     if (accounts.length > 0) {
@@ -73,4 +74,47 @@ export async function discoverClassicAccounts(
     }
   }
   return null;
+}
+
+/**
+ * Full browser-side discovery run: consume the single-use handoff marker, read
+ * the classic account list (with live balances) from Deriv's legacy socket, and
+ * adopt the rows server-side. Shared by the callback page (every sign-in) and
+ * the switcher's "Sync balances" action. Returns what the session now holds.
+ */
+export async function runClassicDiscovery(): Promise<{
+  ok: boolean;
+  accounts: Array<{ loginid: string; currency: string; balance: number; isVirtual: boolean }>;
+  message: string;
+}> {
+  const none = { ok: false, accounts: [] as Array<{ loginid: string; currency: string; balance: number; isVirtual: boolean }>, message: '' };
+  try {
+    const h = await fetch('/api/deriv/handoff', { method: 'POST', credentials: 'same-origin' });
+    if (!h.ok) return { ...none, message: 'No handoff available.' };
+    const hj = (await h.json()) as { ok?: boolean; token?: string; hosts?: string[] };
+    if (!hj.ok || !hj.token) return { ...none, message: 'No handoff token issued.' };
+    const disc = await discoverClassicAccounts(hj.token, hj.hosts ?? []);
+    if (!disc || disc.accounts.length === 0) {
+      return { ...none, message: 'Deriv’s legacy socket returned no accounts from this network.' };
+    }
+    const ad = await fetch('/api/deriv/accounts/adopt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        accounts: disc.accounts.map((a) => ({
+          loginid: a.account_loginid,
+          currency: a.currency,
+          balance: a.balance ?? 0,
+          isVirtual: a.is_virtual === 1,
+        })),
+        scopes: disc.scopes,
+      }),
+    });
+    if (!ad.ok) return { ...none, message: `Adopt failed (HTTP ${ad.status}).` };
+    const aj = (await ad.json()) as { accounts?: typeof none.accounts };
+    return { ok: true, accounts: aj.accounts ?? [], message: 'Accounts synced from Deriv.' };
+  } catch (e) {
+    return { ...none, message: (e as Error).message };
+  }
 }
