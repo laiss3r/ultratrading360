@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { BarChart3, Blocks, LayoutDashboard, LineChart, Moon, PanelRight, Sun, Zap } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { useApp } from '@/state/store';
@@ -22,6 +22,10 @@ const TABS = [
 
 export function AppHeader() {
   const pathname = usePathname();
+  const session = useApp((s) => s.session);
+  const startOAuth = useApp((s) => s.startOAuth);
+  const oauthConfigured = useApp((s) => s.oauthConfigured);
+  const router = useRouter();
   const openQuickStrategy = useApp((s) => s.openQuickStrategy);
   const openRunPanel = useApp((s) => s.setRunPanelOpen);
   const uiTheme = useApp((s) => s.settings.uiTheme);
@@ -86,7 +90,34 @@ export function AppHeader() {
         </button>
 
         <PriceReadout />
-        <AccountSwitcher />
+        {session ? (
+          <AccountSwitcher />
+        ) : (
+          /* Logged-out header, the way community Deriv platforms present it:
+             two honest buttons instead of a greyed-out account box. Both start
+             the same OAuth flow Deriv documents; Sign up adds prompt=registration
+             for people who do not have a Deriv account yet. With no OAuth client
+             on the server they fall back to the Connect page, where the API-token
+             path also lives. */
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => (oauthConfigured ? void startOAuth(false) : router.push('/connect'))}
+              className="inline-flex items-center justify-center rounded border border-line bg-main-1 px-3 py-1.5 text-xs font-bold text-general transition-colors hover:bg-state-hover"
+              title="Log in with your Deriv account via OAuth 2.0"
+            >
+              Log in
+            </button>
+            <button
+              type="button"
+              onClick={() => (oauthConfigured ? void startOAuth(true) : router.push('/connect'))}
+              className="inline-flex items-center justify-center rounded bg-coral px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-coral-hover"
+              title="Create a Deriv account, then authorise this app"
+            >
+              Sign up
+            </button>
+          </div>
+        )}
       </div>
     </header>
   );
