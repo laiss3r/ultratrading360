@@ -16,8 +16,8 @@ const { WebSocketServer } = require('ws');
 
 const FLAKY = process.env.STUB_FLAKY === '1';
 const REST_ROWS = [
-  { account_loginid: 'DOT90004580', currency: 'USD', balance: 10000, is_virtual: 1, account_type: 'demo' },
-  { account_loginid: 'ROT90004581', currency: 'USD', balance: 0, is_virtual: 0, account_type: 'real' },
+  { account_id: 'DOT90004580', currency: 'USD', balance: 10000, group: 'row', status: 'active', account_type: 'demo' },
+  { account_id: 'ROT90004581', currency: 'USD', balance: 0, group: 'row', status: 'active', account_type: 'real' },
 ];
 const CLASSIC_LIST = [
   { loginid: 'VRTC1234567', currency: 'USD', balance: 4172.24, is_virtual: 1 },
@@ -40,7 +40,7 @@ http
         return res.end(JSON.stringify({ message: 'stub transient fault' }));
       }
       res.writeHead(200, { 'content-type': 'application/json' });
-      return res.end(JSON.stringify({ data: { accounts: REST_ROWS } }));
+      return res.end(JSON.stringify({ data: REST_ROWS }));
     }
     if (url.pathname === '/trading/v1/options/accounts' && req.method === 'POST') {
       res.writeHead(201, { 'content-type': 'application/json' });

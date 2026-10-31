@@ -63,6 +63,7 @@ interface State {
 
   provider: MarketProvider | null;
   connectionStatus: string;
+  tradingLoginid: string | null;
   symbols: ActiveSymbol[];
   activeSymbol: string;
   quotes: Quote[];
@@ -151,6 +152,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
 
   provider: null,
   connectionStatus: 'idle',
+  tradingLoginid: null,
   symbols: [],
   activeSymbol: 'R_100',
   quotes: [],
@@ -362,7 +364,6 @@ export const useApp = create<State & Actions>()((set, get) => ({
       get().pushLog('ok', `Options account created: ${j.session.loginid} (${accountType}).`);
       get().rebaseToAccount();
       if (accountType === 'demo') await get().applyMode('deriv_demo', false);
-      get().startBalanceStream();
       return { ok: true, message: `Connected as ${j.session.loginid}` };
     } finally {
       set({ busy: null });
@@ -387,10 +388,12 @@ export const useApp = create<State & Actions>()((set, get) => ({
       set({ session: j.session as AuthSession, accounts: (j.accounts ?? []) as AccountSummary[] });
       get().pushLog('ok', `Connected with API token as ${j.session.loginid}.`);
       get().rebaseToAccount();
-      // Default to the DEMO socket after connecting. Selecting a real account is a separate,
-      // explicitly gated action -- we never silently start on real money.
-      await get().applyMode('deriv_demo', false);
-      get().startBalanceStream();
+      // Display and socket mode follow the same authenticated identity. Viewing
+      // Real is permitted; executing Real orders still requires acknowledgement.
+      const mode = j.session.isVirtual ? 'deriv_demo' : 'deriv_real';
+      await get().setSettings({ mode, realTradingAcknowledged: false, acknowledgedAccountLoginid: null,
+        limits: { ...get().settings.limits, realTradingAcknowledged: false } });
+      await get().applyMode(mode, false);
       return { ok: true, message: `Connected as ${j.session.loginid}` };
     } catch (e) {
       const msg = (e as Error).message;
@@ -474,7 +477,8 @@ export const useApp = create<State & Actions>()((set, get) => ({
     } catch {
       /* private mode: pref is best-effort */
     }
-    await get().setSettings({ mode: acct.isVirtual ? 'deriv_demo' : 'deriv_real' });
+    const acknowledged = get().settings.acknowledgedAccountLoginid === loginid && get().settings.realTradingAcknowledged;
+    await get().setSettings({ mode: acct.isVirtual ? 'deriv_demo' : 'deriv_real', realTradingAcknowledged: acknowledged, acknowledgedAccountLoginid: acknowledged ? loginid : null, limits: { ...get().settings.limits, realTradingAcknowledged: acknowledged } });
     await get().applyMode(acct.isVirtual ? 'deriv_demo' : 'deriv_real', false);
     get().rebaseToAccount();
     if (!opts?.silent) {
@@ -524,7 +528,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
     cur.stopBot(`mode changed to ${mode}`);
     cur.provider?.disconnect();
 
-    set({ dataSource: 'deriv_live', connectionStatus: 'connecting', marketError: null });
+    set({ dataSource: 'deriv_live', connectionStatus: 'connecting', tradingLoginid: null, marketError: null });
 
     // Public market data works with NO credential, so load that first: the charts are useful
     // even before the user connects an account.
@@ -558,7 +562,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
       const r = await fetch('/api/deriv/socket', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ loginid, allowReal: mode === 'deriv_real' && get().settings.realTradingAcknowledged }),
+        body: JSON.stringify({ loginid, allowReal: mode === 'deriv_real' && get().settings.realTradingAcknowledged && get().settings.acknowledgedAccountLoginid === loginid }),
       });
       const j = await r.json();
       if (!r.ok || !j.ok) {
@@ -575,13 +579,13 @@ export const useApp = create<State & Actions>()((set, get) => ({
           if (firstUrl) { const url = firstUrl; firstUrl = null; return url; }
           const response = await fetch('/api/deriv/socket', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ loginid, allowReal: mode === 'deriv_real' && get().settings.realTradingAcknowledged }),
+            body: JSON.stringify({ loginid, allowReal: mode === 'deriv_real' && get().settings.realTradingAcknowledged && get().settings.acknowledgedAccountLoginid === loginid }),
           });
           const fresh = await response.json();
           if (!response.ok || !fresh.url) throw new Error(fresh.message ?? 'Could not renew trading socket');
           return fresh.url as string;
         },
-        onStatus: (s) => { if (get().provider === authed) set({ connectionStatus: s }); },
+        onStatus: (s) => { if (get().provider === authed) set({ connectionStatus: s, ...(s !== 'open' ? { tradingLoginid: null } : {}) }); },
       });
       set({ provider: authed });
       await authed.connect();
@@ -589,7 +593,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
       set({ connectionStatus: 'open' });
       await authed.streamBalance((balance, currency) => {
         if (get().session?.loginid !== loginid || get().provider !== authed) return;
-        set({ session: { ...get().session!, balance, currency },
+        set({ tradingLoginid: loginid, session: { ...get().session!, balance, currency },
           accounts: get().accounts.map((a) => a.loginid === loginid ? { ...a, balance, currency } : a) });
       });
       await get().subscribeTicks(get().activeSymbol);
@@ -770,10 +774,13 @@ export const useApp = create<State & Actions>()((set, get) => ({
         message: 'No Deriv account is connected. Connect a demo or real account before running a bot — this tool trades only on Deriv.',
       };
     }
+    if (get().tradingLoginid !== get().session?.loginid) {
+      return { ok: false, message: 'No verified trading connection for the selected account. Reconnect, and acknowledge Real trading in Risk settings if applicable.' };
+    }
     if (!get().settings.limits.tradingEnabled) {
       return { ok: false, message: 'Trading is disabled. Enable it in Risk settings — the bot refuses to run otherwise.' };
     }
-    if (mode === 'deriv_real' && !get().settings.realTradingAcknowledged) {
+    if (mode === 'deriv_real' && (!get().settings.realTradingAcknowledged || get().settings.acknowledgedAccountLoginid !== get().session?.loginid)) {
       return { ok: false, message: 'Real-money trading is not acknowledged. Confirm it in Risk settings.' };
     }
     if (get().bot && get().botState === 'running') {

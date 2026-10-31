@@ -1,71 +1,44 @@
 'use client';
 
-import { useEffect, type ReactNode } from 'react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { useEffect, useState, type ReactNode } from 'react';
+import { Activity, Blocks, Bot, ChartNoAxesCombined, CircleHelp, History, LayoutDashboard, Moon, Radio, Settings2, ShieldCheck, Sun, Wallet } from 'lucide-react';
 import { useApp } from '@/state/store';
-import { AppHeader } from './Header';
-import { AppFooter } from './Footer';
-import { BottomNav } from './BottomNav';
-import { RunPanel } from './RunPanel';
-import { QuickStrategy } from './QuickStrategy';
+import { AccountMenu } from './AccountMenu';
+import { SessionRail } from './Workspace';
 
-/**
- * Application shell, laid out the way Deriv's own platforms are:
- *
- *   header   brand · primary tabs · account switcher + balance
- *   body     page workspace  |  run drawer (366px, Summary/Transactions/Journal)
- *   footer   fullscreen · theme · UTC clock · connection status
- *
- * The run drawer is part of the shell rather than of any one page, because in
- * Deriv Bot it stays mounted while you move between the builder and the chart —
- * the bot keeps running and its journal keeps filling wherever you are.
- */
+const navigation = [
+  { href: '/', label: 'Dashboard', Icon: LayoutDashboard },
+  { href: '/builder', label: 'Bot Builder', Icon: Blocks },
+  { href: '/overlord', label: 'Overlord Pro', Icon: Bot },
+  { href: '/signals', label: 'Signal Tools', Icon: Radio },
+  { href: '/chart', label: 'Trading Chart', Icon: ChartNoAxesCombined },
+  { href: '/history', label: 'Trade History', Icon: History },
+  { href: '/risk', label: 'Risk & Settings', Icon: Settings2 },
+];
+
 export function AppShell({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+  const theme = useApp((s) => s.settings.uiTheme);
+  const status = useApp((s) => s.connectionStatus);
   const hydrated = useApp((s) => s.hydrated);
-  const hydrate = useApp((s) => s.hydrate);
-  const uiTheme = useApp((s) => s.settings.uiTheme);
-  const setRunPanelOpen = useApp((s) => s.setRunPanelOpen);
-
-  useEffect(() => {
-    void hydrate();
-  }, [hydrate]);
-
-  // On a phone the drawer is an overlay, so starting open would cover the page the
-  // user just asked for. It stays inline and open on desktop, exactly as Deriv Bot
-  // keeps its run panel beside the workspace.
-  useEffect(() => {
-    const t = setTimeout(() => {
-      if (typeof window !== 'undefined' && window.innerWidth < 1024) setRunPanelOpen(false);
-    }, 0);
-    return () => clearTimeout(t);
-  }, [setRunPanelOpen]);
-
-  // The theme is a data attribute on <html>, which is what the token layer in
-  // globals.css keys off. Setting it here rather than in a class keeps every
-  // Tailwind utility theme-aware without a second set of colour names.
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-    document.documentElement.dataset.theme = uiTheme;
-  }, [uiTheme]);
-
-  return (
-    <div className="dt-layout">
-      <AppHeader />
-      <div className="dt-body">
-        <main className="dt-main">{hydrated ? children : <Restoring />}</main>
-        <RunPanel />
-      </div>
-      <BottomNav />
-      <AppFooter />
-      <QuickStrategy />
+  const [bootError, setBootError] = useState('');
+  const [railOpen, setRailOpen] = useState(false);
+  useEffect(() => { void useApp.getState().hydrate().catch((e: Error) => setBootError(e.message)); }, []);
+  useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
+  const simple = pathname === '/callback';
+  return <div className="application">
+    <header className="topbar"><Link href="/" className="brand" aria-label="UltraTrading360 dashboard"><span className="brand-symbol"><Activity size={23} /></span><span>ULTRA<span className="brand-weight">TRADING</span><b>360</b><small>DERIV TRADING WORKSPACE</small></span></Link>
+      <div className="top-status"><span className={status === 'open' ? 'live-dot' : 'stale-dot'} /><span>{status === 'open' ? 'Market feed connected' : status === 'connecting' ? 'Connecting market feed' : 'Market feed offline'}</span></div>
+      <div className="top-actions"><button className="icon-button theme-button" aria-label="Toggle color theme" onClick={() => void useApp.getState().setSettings({ uiTheme: theme === 'dark' ? 'light' : 'dark' })}>{theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}</button><AccountMenu /></div>
+    </header>
+    {!simple && <nav className="tool-nav" aria-label="Trading tools">{navigation.map(({ href, label, Icon }) => <Link key={href} href={href} aria-current={pathname === href ? 'page' : undefined}><Icon size={17} /><span>{label}</span></Link>)}<button className="session-toggle" aria-expanded={railOpen} onClick={() => setRailOpen(!railOpen)}><Activity size={17} />Session</button></nav>}
+    <div className={`workspace-shell ${simple ? 'single-column' : ''}`}>
+      <main id="main-content" className="workspace-main">{bootError && <div className="notice notice-error" role="alert">Workspace initialization failed: {bootError}. Refresh to retry.</div>}{!hydrated && <div className="boot-status" role="status">Restoring your workspace…</div>}{children}</main>
+      {!simple && <aside className={`session-sidebar ${railOpen ? 'mobile-open' : ''}`} aria-label="Session monitor"><button className="rail-close button button-secondary" onClick={() => setRailOpen(false)}>Close session monitor</button><SessionRail /></aside>}
     </div>
-  );
-}
-
-function Restoring() {
-  return (
-    <div className="flex h-[60vh] flex-col items-center justify-center gap-3">
-      <div className="h-6 w-6 animate-spin rounded-full border-2 border-line border-t-coral" />
-      <p className="text-xs text-less-prominent">Restoring local workspace…</p>
-    </div>
-  );
+    <footer className="site-footer"><span><ShieldCheck size={13} />Connected to Deriv infrastructure</span><span>Trading involves risk. No guaranteed returns.</span><a href="https://developers.deriv.com/" target="_blank" rel="noreferrer"><CircleHelp size={13} />API documentation ↗</a></footer>
+    {!simple && <nav className="mobile-nav" aria-label="Mobile navigation">{[{href:'/',label:'Home',Icon:LayoutDashboard},{href:'/builder',label:'Builder',Icon:Blocks},{href:'/overlord',label:'Bots',Icon:Bot},{href:'/signals',label:'Signals',Icon:Radio},{href:'/connect',label:'Account',Icon:Wallet}].map(({href,label,Icon}) => <Link href={href} key={href} aria-current={pathname===href?'page':undefined}><Icon size={19}/><span>{label}</span></Link>)}</nav>}
+  </div>;
 }

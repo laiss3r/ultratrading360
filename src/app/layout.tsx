@@ -3,14 +3,14 @@ import './globals.css';
 import { AppShell } from '@/components/AppShell';
 
 export const metadata: Metadata = {
-  title: 'UltraTrading360 — Deriv Trading Automation',
+  title: 'UltraTrading360 — Your Deriv Workspace',
   description:
     'A Deriv third-party trading tool: visual strategy builder, automated bots and statistical analysis running against live Deriv market data and your demo or real account, with enforced risk limits.',
   applicationName: 'UltraTrading360',
 };
 
 export const viewport: Viewport = {
-  themeColor: '#ffffff',
+  themeColor: '#101d52',
   width: 'device-width',
   initialScale: 1,
 };
