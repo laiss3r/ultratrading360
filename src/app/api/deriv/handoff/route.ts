@@ -25,7 +25,7 @@ export async function POST() {
   const marker = store.get(HANDOFF_COOKIE)?.value;
   const raw = store.get(SESSION_COOKIE)?.value;
   const session = raw ? decryptSession(raw) : null;
-  const allowed = Boolean(session?.accessToken && marker && verifySignedValue(marker));
+  const allowed = Boolean(session?.accessToken && (!session.expiresAt || session.expiresAt > Date.now()) && marker && verifySignedValue(marker));
 
   const res = NextResponse.json(
     allowed
@@ -33,6 +33,7 @@ export async function POST() {
       : { ok: false, message: 'No single-use handoff is pending for this browser.' },
     { status: allowed ? 200 : 403 },
   );
+  res.headers.set('Cache-Control', 'no-store');
   // Burn the marker either way: a handoff attempt is one-shot.
   res.cookies.set(HANDOFF_COOKIE, '', { path: '/', maxAge: 0 });
   return res;

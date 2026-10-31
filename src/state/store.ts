@@ -1,6 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
+import { watchClassicBalances, type BalanceStatus, type BalanceUpdate } from '@/lib/deriv/classicBalances';
 import { runClassicDiscovery } from '@/lib/deriv/browserLegacyWs';
 import type { AccountMode, ActiveSymbol, AuthSession } from '@/lib/deriv/types';
 import { DERIV_APP_ID } from '@/lib/deriv/config';
@@ -82,6 +83,8 @@ interface State {
   riskSnapshot: RiskSnapshot;
   log: LogEntry[];
   busy: string | null;
+  balanceStatus: BalanceStatus;
+  balanceMessage: string;
 
   rankings: MarketRanking[];
 
@@ -126,6 +129,8 @@ function entropy(digits: number[]): number {
 
 const PREF_LOGINID = 'ut_pref_loginid';
 let upkeepStarted = false;
+let stopBalances: (() => void) | null = null;
+const lastBalances = new Map<string, BalanceUpdate>();
 let staleRetry: ReturnType<typeof setTimeout> | null = null;
 function scheduleStaleRetry() {
   if (staleRetry) return;
@@ -166,6 +171,8 @@ export const useApp = create<State & Actions>()((set, get) => ({
   riskSnapshot: new RiskManager().getSnapshot(),
   log: [],
   busy: null,
+  balanceStatus: 'stale',
+  balanceMessage: 'Balances are last known until a live update arrives.',
   rankings: [],
   runPanelOpen: true,
   runPanelTab: 'summary',
@@ -256,6 +263,24 @@ export const useApp = create<State & Actions>()((set, get) => ({
 
   /* ---------------------------------------------------------- connection */
 
+  startBalanceStream() {
+    if (stopBalances || !get().session) return;
+    stopBalances = watchClassicBalances((updates) => {
+      if (!get().session) return;
+      for (const u of updates) lastBalances.set(u.loginid, u);
+      const active = lastBalances.get(get().session!.loginid);
+      set({
+        accounts: get().accounts.map((a) => ({ ...a, ...lastBalances.get(a.loginid) })),
+        session: active ? { ...get().session!, balance: active.balance, currency: active.currency } : get().session,
+      });
+    }, (balanceStatus, balanceMessage) => set({ balanceStatus, balanceMessage: balanceMessage ?? '' }));
+  },
+
+  stopBalanceStream() {
+    stopBalances?.(); stopBalances = null; lastBalances.clear();
+    set({ balanceStatus: 'stale', balanceMessage: 'Balance stream disconnected.' });
+  },
+
   startUpkeep() {
     if (upkeepStarted || typeof window === 'undefined') return;
     upkeepStarted = true;
@@ -285,7 +310,8 @@ export const useApp = create<State & Actions>()((set, get) => ({
       const j = await r.json();
       if (j.authenticated && j.session) {
         const had = get().session;
-        set({ session: j.session as AuthSession });
+        const newest = lastBalances.get(j.session.loginid);
+        set({ session: newest ? { ...j.session, balance: newest.balance, currency: newest.currency } : j.session as AuthSession });
         if (notify) get().pushLog('ok', `Session active: ${j.session.loginid} (${j.session.currency})`);
         if (!had || had.loginid !== j.session.loginid) get().rebaseToAccount();
         if (j.stale) {
@@ -294,6 +320,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
           scheduleStaleRetry();
         }
       } else if (j.authenticated === false && (r.ok || r.status === 401)) {
+        get().stopBalanceStream();
         get().stopBot('session ended');
         get().provider?.disconnect();
         set({ session: null, accounts: [] });
@@ -310,7 +337,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
       const a = await fetch(opts?.revalidate === false ? '/api/deriv/accounts?cached=1' : '/api/deriv/accounts', { cache: 'no-store' });
       if (a.ok) {
         const aj = await a.json();
-        if (aj.ok) set({ accounts: aj.accounts as AccountSummary[] });
+        if (aj.ok) set({ accounts: (aj.accounts as AccountSummary[]).map((a) => ({ ...a, ...lastBalances.get(a.loginid) })) });
       }
     } catch (e) {
       if (notify) get().pushLog('error', `Session refresh failed: ${(e as Error).message}`);
@@ -335,6 +362,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
       get().pushLog('ok', `Options account created: ${j.session.loginid} (${accountType}).`);
       get().rebaseToAccount();
       if (accountType === 'demo') await get().applyMode('deriv_demo', false);
+      get().startBalanceStream();
       return { ok: true, message: `Connected as ${j.session.loginid}` };
     } finally {
       set({ busy: null });
@@ -342,6 +370,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
   },
 
   async connectWithPat(token: string): Promise<{ ok: boolean; message: string }> {
+    get().stopBalanceStream();
     set({ busy: 'pat' });
     try {
       const r = await fetch('/api/deriv/token', {
@@ -361,6 +390,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
       // Default to the DEMO socket after connecting. Selecting a real account is a separate,
       // explicitly gated action -- we never silently start on real money.
       await get().applyMode('deriv_demo', false);
+      get().startBalanceStream();
       return { ok: true, message: `Connected as ${j.session.loginid}` };
     } catch (e) {
       const msg = (e as Error).message;
@@ -394,6 +424,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
   },
 
   async disconnect(): Promise<void> {
+    get().stopBalanceStream();
     get().stopBot('disconnected');
     try {
       await fetch('/api/deriv/oauth/logout', { method: 'POST' });
@@ -435,7 +466,9 @@ export const useApp = create<State & Actions>()((set, get) => ({
       return { ok: false, message: msg };
     }
     get().provider?.disconnect();
-    set({ session: j.session, accounts: (j.accounts ?? get().accounts) as AccountSummary[] });
+    const latestBalance = lastBalances.get(loginid);
+    set({ session: latestBalance ? { ...j.session, balance: latestBalance.balance, currency: latestBalance.currency } : j.session,
+      accounts: ((j.accounts ?? get().accounts) as AccountSummary[]).map((a) => ({ ...a, ...lastBalances.get(a.loginid) })) });
     try {
       localStorage.setItem(PREF_LOGINID, loginid);
     } catch {
@@ -837,6 +870,8 @@ interface Actions {
   selectAccount: (loginid: string, opts?: { silent?: boolean }) => Promise<{ ok: boolean; message: string }>;
   syncBalances: () => Promise<{ ok: boolean; message: string }>;
   startUpkeep: () => void;
+  startBalanceStream: () => void;
+  stopBalanceStream: () => void;
   applyMode: (mode: AccountMode, initial?: boolean) => Promise<void>;
   attachTradingSocket: (mode: 'deriv_demo' | 'deriv_real') => Promise<void>;
   loadMarket: (initial?: boolean) => Promise<void>;

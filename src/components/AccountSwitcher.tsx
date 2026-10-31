@@ -34,6 +34,14 @@ export function AccountSwitcher() {
   const pushLog = useApp((s) => s.pushLog);
   const syncBalances = useApp((s) => s.syncBalances);
   const busy = useApp((s) => s.busy);
+  const balanceStatus = useApp((s) => s.balanceStatus);
+  const balanceMessage = useApp((s) => s.balanceMessage);
+  const authenticated = Boolean(session);
+  useEffect(() => {
+    if (authenticated) useApp.getState().startBalanceStream();
+    else useApp.getState().stopBalanceStream();
+    return () => useApp.getState().stopBalanceStream();
+  }, [authenticated]);
 
   useEffect(() => {
     if (!open) return;
@@ -141,6 +149,9 @@ export function AccountSwitcher() {
           {session && (
             <div className="border-b border-line p-3">
               <div className="dt-section-title mb-2">Deriv accounts</div>
+              <p role="status" className="mb-2 text-xxs text-less-prominent" title={balanceMessage}>
+                {balanceStatus === 'live' ? 'Balance stream connected — rows update when Deriv sends changes' : balanceStatus === 'connecting' ? 'Connecting balances… showing last known values' : 'Balance stream disconnected — last known values'}
+              </p>
               {accounts.length === 0 ? (
                 <p className="text-xs text-less-prominent">No other accounts on this session.</p>
               ) : (
