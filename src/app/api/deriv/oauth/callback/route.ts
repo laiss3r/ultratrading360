@@ -111,17 +111,17 @@ export async function POST(req: Request) {
     }
   }
 
-  // Prefer a real account for display, but never silently promote one: the UI shows every
-  // account and requires an explicit selection before real trading is enabled.
+  // Fresh login opens the returned Real account for viewing. Real execution still
+  // requires separate acknowledgement and trading permission.
   const primary = accounts.find((a) => a.is_virtual !== 1) ?? accounts[0];
   const expiresAt = token.expiresIn > 0 ? Date.now() + token.expiresIn * 1000 : null;
   const session = noAccounts
-    ? { ...buildNoAccountsSession('oauth', expiresAt), accessToken: token.accessToken }
+    ? { ...buildNoAccountsSession('oauth', expiresAt), initialRealAccountPending: primary?.is_virtual !== 0, accessToken: token.accessToken }
     : {
         ...buildSession('oauth', primary as AccountInfo, scopes, expiresAt),
         accountsSource: source,
         accountRows: accounts,
-        accessToken: token.accessToken,
+        initialRealAccountPending: primary?.is_virtual !== 0, accessToken: token.accessToken,
       };
 
   const res = NextResponse.json({

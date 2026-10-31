@@ -43,3 +43,21 @@ describe('session revalidation isolation', () => {
     expect(edge.validate).not.toHaveBeenCalled();
   });
 });
+
+
+describe('fresh-login Real preference', () => {
+  it('promotes a genuine zero-balance Real returned after a Demo-only login', async () => {
+    edge.cookie = encryptSession({ ...session, initialRealAccountPending: true });
+    edge.validate.mockResolvedValue({ accounts: [{ account_loginid: 'ROT1', balance: 0, currency: 'USD', is_virtual: 0 }] });
+    const data = await (await GET(new Request('https://example.test/api/deriv/session?refresh=1'))).json();
+    expect(data.session).toMatchObject({loginid:'ROT1',balance:0,isVirtual:false});
+    expect(data.session.accessToken).toBeUndefined();
+    expect(data.session.initialRealAccountPending).toBeUndefined();
+  });
+  it('keeps Demo if no Real account is returned', async () => {
+    edge.cookie = encryptSession({ ...session, initialRealAccountPending: true });
+    edge.validate.mockResolvedValue({ accounts: [{ account_loginid: session.loginid, balance: 4172.24, currency: 'USD', is_virtual: 1 }] });
+    const data = await (await GET(new Request('https://example.test/api/deriv/session?refresh=1'))).json();
+    expect(data.session.loginid).toBe(session.loginid);
+  });
+});

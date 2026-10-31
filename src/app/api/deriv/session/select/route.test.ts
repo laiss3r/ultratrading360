@@ -30,3 +30,10 @@ describe('server-backed real account selection', () => {
     expect((await POST(request('DOT1'))).status).toBe(200);
   });
 });
+
+it('an explicit Demo choice cancels pending initial Real preference', async () => {
+  edge.cookie=encryptSession({...session,initialRealAccountPending:true});
+  const response=await POST(request('DOT1'));
+  const saved=decryptSession(response.cookies.get(SESSION_COOKIE)!.value)!;
+  expect(saved.loginid).toBe('DOT1');expect(saved.initialRealAccountPending).toBe(false);
+});

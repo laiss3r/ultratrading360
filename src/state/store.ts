@@ -205,12 +205,9 @@ export const useApp = create<State & Actions>()((set, get) => ({
     // background upkeep loop instead.
     await get().refreshSession(false, { revalidate: false });
     get().startUpkeep();
-    // Restore the account the user last chose, across routes, reloads and tabs.
-    const pref = typeof localStorage !== 'undefined' ? localStorage.getItem(PREF_LOGINID) : null;
-    const chosen = pref && get().accounts.some((a) => a.loginid === pref) ? pref : null;
-    if (chosen && get().session && chosen !== get().session?.loginid) {
-      await get().selectAccount(chosen, { silent: true });
-    }
+    // The server cookie is authoritative. A stale local Demo preference from a
+    // previous login must not override a fresh login's Real default. Explicit
+    // switching already persists the choice in this cookie.
     const active = get().session?.loginid ?? null;
     const activeRow = active ? get().accounts.find((a) => a.loginid === active) : null;
     const mode = activeRow ? (activeRow.isVirtual ? 'deriv_demo' : 'deriv_real') : settings.mode;
@@ -315,7 +312,17 @@ export const useApp = create<State & Actions>()((set, get) => ({
         const newest = lastBalances.get(j.session.loginid);
         set({ session: newest ? { ...j.session, balance: newest.balance, currency: newest.currency } : j.session as AuthSession });
         if (notify) get().pushLog('ok', `Session active: ${j.session.loginid} (${j.session.currency})`);
-        if (!had || had.loginid !== j.session.loginid) get().rebaseToAccount();
+        if (!had || had.loginid !== j.session.loginid) {
+          get().rebaseToAccount();
+          try { localStorage.setItem(PREF_LOGINID, j.session.loginid); } catch { /* private mode */ }
+        }
+        if (had && had.loginid !== j.session.loginid && get().provider) {
+          const mode = j.session.isVirtual ? 'deriv_demo' : 'deriv_real';
+          get().stopBalanceStream();
+          await get().setSettings({ mode, realTradingAcknowledged: false, acknowledgedAccountLoginid: null,
+            limits: { ...get().settings.limits, realTradingAcknowledged: false } });
+          await get().applyMode(mode, false);
+        }
         if (j.stale) {
           // Deriv was unreachable during revalidation: stay signed in, retry soon.
           get().pushLog('info', 'Deriv could not be reached to revalidate; staying signed in and retrying.');

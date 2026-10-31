@@ -1,3 +1,4 @@
+import { selectSessionAccount } from '@/lib/deriv/accountSelection';
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { adoptedRowsToAccounts, buildSession } from '@/lib/deriv/auth';
@@ -37,13 +38,8 @@ export async function POST(req: Request) {
   const merged = new Map((session.accountRows ?? []).map((a) => [a.account_loginid, a]));
   for (const a of adoptedRowsToAccounts(rows)) merged.set(a.account_loginid, a);
   const accounts = Array.from(merged.values());
-  // Keep whichever primary the session already trades with (the created Options
-  // row), otherwise prefer an Options row, otherwise the first virtual classic row.
-  const primary =
-    accounts.find((a) => a.account_loginid === session.loginid) ??
-    accounts.find((a) => /^(DOT|ROT)/.test(a.account_loginid)) ??
-    accounts.find((a) => a.is_virtual === 1) ??
-    accounts[0];
+  // Complete fresh-login Real preference, but never override a later manual choice.
+  const primary = selectSessionAccount(session, accounts)!;
   const scopes =
     Array.isArray(body.scopes) && body.scopes.every((x) => typeof x === 'string')
       ? (body.scopes as string[])
@@ -51,6 +47,7 @@ export async function POST(req: Request) {
   const next = {
     ...buildSession(session.kind, primary, scopes, session.expiresAt),
     needsOptionsAccount: undefined,
+    initialRealAccountPending: session.initialRealAccountPending === true && primary.is_virtual !== 0,
     accountsSource: 'classic_browser' as const,
     accountRows: accounts,
     accessToken: session.accessToken,

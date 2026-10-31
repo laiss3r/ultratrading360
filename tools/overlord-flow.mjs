@@ -6,6 +6,8 @@ const b=await chromium.launch();const context=await b.newContext({viewport:{widt
 try{
  await page.request.post('http://127.0.0.1:4517/__fixture/reset');
  const login=await page.request.post(base+'/api/deriv/token',{data:{token:'synthetic-fixture-only'}});check('synthetic upstream login succeeds',login.ok());
+ // Fresh login now prefers Real; this order fixture explicitly opts into Demo.
+ const selected=await page.request.post(base+'/api/deriv/session/select',{data:{loginid:'DOT90004580'}});assert.ok(selected.ok());
  await page.goto(base+'/risk');await page.locator('button[aria-haspopup="menu"]').waitFor();
  await page.waitForFunction(()=>Array.from(document.querySelectorAll('dd')).some((e)=>e.textContent==='Verified'),undefined,{timeout:20000});
  await page.getByRole('switch',{name:'Allow this browser to place trades'}).click();

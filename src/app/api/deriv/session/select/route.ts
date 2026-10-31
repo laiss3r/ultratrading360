@@ -59,6 +59,7 @@ export async function POST(req: Request) {
   const next = {
     ...buildSession(session.kind, row, session.scopes, session.expiresAt),
     needsOptionsAccount: undefined,
+    initialRealAccountPending: false,
     accountsSource: session.accountsSource,
     accountRows: rows,
     accessToken: session.accessToken,

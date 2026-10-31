@@ -51,8 +51,8 @@ export async function POST(req: Request) {
     // PATs carry no expiry we can read from the API; cap the local session at 8 hours so a
     // stale cookie cannot outlive a revoked token by much.
     const session = noAccounts
-      ? { ...buildNoAccountsSession('pat', null), accessToken: raw.trim() }
-      : { ...buildSession('pat', primary as AccountInfo, scopes, null), accountsSource: source, accountRows: accounts, accessToken: raw.trim() };
+      ? { ...buildNoAccountsSession('pat', null), initialRealAccountPending: primary?.is_virtual !== 0, accessToken: raw.trim() }
+      : { ...buildSession('pat', primary as AccountInfo, scopes, null), accountsSource: source, accountRows: accounts, initialRealAccountPending: primary?.is_virtual !== 0, accessToken: raw.trim() };
 
     const res = NextResponse.json({
       ok: true,

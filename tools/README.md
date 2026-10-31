@@ -63,3 +63,11 @@ stakes 1/2.10/4.41, contracts EVEN/OVER/OVER, duration 3 and a 1.09 profit halt.
 The fixture has private-loopback `/__fixture/trades` and `/__fixture/reset` endpoints
 only when STUB_TRADING is enabled. Stop both servers and make a **clean build
 without the fixture overrides** before production deployment.
+
+## Fresh-login Real default
+
+With `STUB_DEMO_ONLY=1 STUB_CLASSIC_NO_BALANCES=1` and the same synthetic build/start
+configuration, run `tools/real-default-flow.mjs`. Its 12 checks cover late Real discovery,
+stale local Demo preferences, explicit Demo/Real switching, reload and account refresh,
+a second fresh login, independent execution permission and mobile/browser safety.
+The Overlord order harness explicitly selects Demo before enabling its test permission.

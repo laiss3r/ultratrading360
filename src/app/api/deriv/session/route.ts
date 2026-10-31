@@ -1,3 +1,4 @@
+import { selectSessionAccount } from '@/lib/deriv/accountSelection';
 import { NextResponse } from 'next/server';
 import { classifyRevalidation } from '@/lib/deriv/auth';
 import { cookies } from 'next/headers';
@@ -68,11 +69,19 @@ export async function GET(req: Request) {
       }
       throw e;
     }
-    const current = accounts.find((a) => a.account_loginid === session.loginid);
+    const merged = new Map((session.accountRows ?? []).map((a) => [a.account_loginid, a]));
+    for (const account of accounts) merged.set(account.account_loginid, account);
+    const rows = [...merged.values()];
+    const current = session.initialRealAccountPending
+      ? selectSessionAccount(session, rows)
+      : rows.find((a) => a.account_loginid === session.loginid);
     if (!current) return NextResponse.json({ authenticated: true, session: publicSession(session), stale: true });
     const updated: StoredSession = {
       ...session,
-      balance: Number(current.balance ?? session.balance),
+      loginid: current.account_loginid,
+      accountRows: rows,
+      initialRealAccountPending: session.initialRealAccountPending === true && current.is_virtual !== 0,
+      balance: Number(current.balance ?? (current.account_loginid === session.loginid ? session.balance : 0)),
       currency: current.currency ?? session.currency,
       isVirtual: current.is_virtual === 1,
       needsOptionsAccount: undefined,
