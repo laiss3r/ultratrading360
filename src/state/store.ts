@@ -492,29 +492,51 @@ export const useApp = create<State & Actions>()((set, get) => ({
     }
   },
 
-  /** Re-read live classic balances via the one-shot browser discovery run. */
+  /** Refresh every available account source, not just a non-empty Options list. */
   async syncBalances(): Promise<{ ok: boolean; message: string }> {
+    if (!get().session) return { ok: false, message: 'Connect a Deriv account first.' };
+    if (get().busy) return { ok: false, message: 'Another account operation is in progress.' };
+    const loginid = get().session!.loginid;
     set({ busy: 'sync-balances' });
     try {
-      // Current Options accounts come from REST; do not make their refresh depend
-      // on a legacy socket which may reject the current OAuth credential.
-      const response = await fetch('/api/deriv/accounts', { cache: 'no-store' });
-      const listing = await response.json().catch(() => null);
-      if (response.ok && listing?.ok && !listing.cached && listing.accounts?.length) {
-        set({ accounts: (listing.accounts as AccountSummary[]).map((a) => ({ ...a, ...lastBalances.get(a.loginid) })) });
+      let fresh = false;
+      try {
+        const response = await fetch('/api/deriv/accounts', { cache: 'no-store' });
+        const listing = await response.json().catch(() => null);
+        if (get().session?.loginid !== loginid) return { ok: false, message: 'Account changed during discovery.' };
+        if (response.ok && listing?.ok && Array.isArray(listing.accounts)) {
+          // The route merges known classic rows; an empty response must not erase them.
+          if (listing.accounts.length) set({ accounts: (listing.accounts as AccountSummary[]).map((a) => ({ ...a, ...lastBalances.get(a.loginid) })) });
+          fresh = !listing.cached;
+        }
+      } catch {
+        // A temporary REST fault is not proof that no additional accounts exist.
+      }
+      const rows = get().accounts;
+      if (fresh && rows.some((a) => a.isVirtual) && rows.some((a) => !a.isVirtual)) {
         await get().refreshSession(false);
         return { ok: true, message: 'Account balances refreshed from Deriv.' };
       }
-      await fetch('/api/deriv/handoff/refresh', { method: 'POST', credentials: 'same-origin' });
+      // Demo-only is incomplete discovery, NOT an instruction to skip classic accounts.
+      const marker = await fetch('/api/deriv/handoff/refresh', { method: 'POST', credentials: 'same-origin', cache: 'no-store' });
+      if (!marker.ok) return { ok: false, message: 'Listed accounts retained. Additional account discovery could not be authorized.' };
+      if (get().session?.loginid !== loginid) return { ok: false, message: 'Account changed during discovery.' };
       const res = await runClassicDiscovery();
+      if (get().session?.loginid !== loginid) return { ok: false, message: 'Account changed during discovery.' };
       if (res.ok && res.accounts.length > 0) {
-        set({ accounts: res.accounts as AccountSummary[] });
+        // Preserve Options rows even if an upstream returns only its classic subset.
+        const merged = new Map(get().accounts.map((a) => [a.loginid, a]));
+        for (const account of res.accounts) merged.set(account.loginid, account);
+        set({ accounts: [...merged.values()] });
         await get().refreshSession(false, { revalidate: false });
-        get().pushLog('ok', `Balances synced for ${res.accounts.length} account(s) from Deriv.`);
+        get().pushLog('ok', `Account discovery completed with ${get().accounts.length} account(s).`);
         return { ok: true, message: res.message };
       }
-      get().pushLog('warn', `Balance sync: ${res.message}`);
-      return { ok: false, message: res.message };
+      const message = `Listed accounts retained. Additional discovery: ${res.message}`;
+      get().pushLog('warn', message);
+      return { ok: false, message };
+    } catch (e) {
+      return { ok: false, message: `Listed accounts retained. Additional discovery failed: ${(e as Error).message}` };
     } finally {
       set({ busy: null });
     }

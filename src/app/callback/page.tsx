@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { LoaderCircle, ShieldCheck } from 'lucide-react';
 import { useApp } from '@/state/store';
-import { runClassicDiscovery } from '@/lib/deriv/browserLegacyWs';
 import { Notice } from '@/components/ui';
 
 function Callback(){
@@ -24,9 +23,6 @@ function Callback(){
         const response=await fetch('/api/deriv/oauth/callback',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({code,state})});
         const result=await response.json();
         if(!response.ok||!result.ok){await useApp.getState().refreshSession(false,{revalidate:false});if(useApp.getState().session){router.replace('/');return;}throw new Error(result.message??'Deriv sign-in could not be completed.');}
-        // Only legacy-only profiles need a browser discovery handoff. Current
-        // Options accounts are already returned by the server's normalized API.
-        if(!result.accounts?.length) await runClassicDiscovery();
         await useApp.getState().refreshSession(false);
         const current=useApp.getState();
         if(!current.session)throw new Error('The session could not be restored. Please reconnect.');
@@ -34,6 +30,9 @@ function Callback(){
         const mode=active?.isVirtual===false?'deriv_real':'deriv_demo';
         // Do not block navigation on slow market history. Auth already succeeded.
         void current.applyMode(mode).catch(()=>{});
+        // A Demo Options row does not establish that a profile has no classic Real account.
+        // Continue read-only discovery in the background without delaying navigation.
+        if(!current.accounts.some((a)=>a.isVirtual)||!current.accounts.some((a)=>!a.isVirtual)) void current.syncBalances();
         window.history.replaceState({},'', '/callback');
         setMessage(`Connected as ${current.session.loginid}. Opening your workspace…`);
         router.replace('/');

@@ -37,3 +37,14 @@ These checks do NOT validate interactive Deriv OAuth consent, the user's real ba
 actual OTP issuance or live trading. The fixtures contain invented test-only IDs/balances and must
 never be described as a live Deriv acceptance test. Transient failures and token revocation are also
 covered separately by API/client unit tests.
+
+## Demo-only listing regression
+
+For the reported missing-Real scenario, start the fixture with
+`STUB_DEMO_ONLY=1 STUB_CLASSIC_NO_BALANCES=1 node tools/derivstub.mjs`.
+Use the same fixture build/start configuration above and run
+`node tools/account-discovery-flow.mjs` (same optional `PLAYWRIGHT_MODULE`).
+The 11-check run starts from an existing Demo-only session, verifies automatic
+additional discovery and actual all-account balances, then checks Real selection,
+reload/navigation persistence, refresh retention and independent trading rejection.
+No live account or live trade is used.

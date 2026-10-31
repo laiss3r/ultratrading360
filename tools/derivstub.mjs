@@ -40,7 +40,7 @@ http
         return res.end(JSON.stringify({ message: 'stub transient fault' }));
       }
       res.writeHead(200, { 'content-type': 'application/json' });
-      return res.end(JSON.stringify({ data: REST_ROWS }));
+      return res.end(JSON.stringify({ data: process.env.STUB_DEMO_ONLY === '1' ? REST_ROWS.filter((a) => a.account_type === 'demo') : REST_ROWS }));
     }
     if (url.pathname === '/trading/v1/options/accounts' && req.method === 'POST') {
       res.writeHead(201, { 'content-type': 'application/json' });
@@ -68,11 +68,12 @@ legacy.on('connection', (ws) => {
             currency: 'USD',
             is_virtual: 1,
             scope: 'read trade account_manage',
-            account_list: CLASSIC_LIST,
+            account_list: process.env.STUB_CLASSIC_NO_BALANCES === '1' ? CLASSIC_LIST.map(({balance: _balance, ...row}) => row) : CLASSIC_LIST,
           },
         }),
       );
     }
+    if (m.balance) return ws.send(JSON.stringify({msg_type:'balance',req_id:m.req_id,subscription:{id:'classic-balances'},balance:{accounts:Object.fromEntries(CLASSIC_LIST.map((a)=>[a.loginid,{balance:a.balance,currency:a.currency}]))}}));
     ws.send(JSON.stringify({ msg_type: 'error', error: { code: 'UnknownMethod', message: 'stub' } }));
   });
 });
