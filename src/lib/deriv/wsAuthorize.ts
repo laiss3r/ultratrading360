@@ -76,6 +76,44 @@ function attempt(url: string, token: string, timeoutMs: number): Promise<Authori
   });
 }
 
+/** Unauthenticated reachability probe used by the live check route: does the
+ *  legacy edge accept our handshake from this network at all? */
+export async function pingLegacyWs(timeoutMs = 2500, hosts: string[] = legacyWsHosts()): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  for (const host of hosts) {
+    const left = deadline - Date.now();
+    if (left < 300) break;
+    const ok = await new Promise<boolean>((resolve) => {
+      let settled = false;
+      const finish = (v: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        try { ws?.close(); } catch { /* closed */ }
+        resolve(v);
+      };
+      const timer = setTimeout(() => finish(false), left);
+      let ws: WebSocket | null = null;
+      try {
+        ws = new WebSocket(classicWsUrl(host, DERIV_APP_ID), { handshakeTimeout: Math.min(2000, left), headers: BROWSER_HEADERS });
+      } catch {
+        finish(false);
+        return;
+      }
+      ws.on('open', () => { try { ws?.send(JSON.stringify({ ping: 1 })); } catch { finish(false); } });
+      ws.on('message', (raw) => {
+        try {
+          const m = JSON.parse(raw.toString()) as { msg_type?: string };
+          finish(m.msg_type === 'ping');
+        } catch { finish(false); }
+      });
+      ws.on('error', () => finish(false));
+    });
+    if (ok) return true;
+  }
+  return false;
+}
+
 export async function authorizeViaSocket(
   token: string,
   appId: string = DERIV_APP_ID,

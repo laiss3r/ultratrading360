@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { pingLegacyWs } from '@/lib/deriv/wsAuthorize';
 import { getOAuthClientId, getRedirectUri, OAUTH_SCOPES } from '@/lib/deriv/config';
 import { buildAuthorizeUrl, deriveCodeChallenge, generateCodeVerifier } from '@/lib/oauth/pkce';
 import { interpretProbeRedirect } from '@/lib/oauth/probe';
@@ -39,6 +40,7 @@ export async function GET() {
     return NextResponse.json({
       registered: null,
       detail: `Probe could not reach Deriv (${e instanceof Error ? e.message : 'unknown error'}).`,
+    legacyWs: await pingLegacyWs(),
       redirectUri,
     });
   }

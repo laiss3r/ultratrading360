@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { DERIV_API_BASE } from '@/lib/deriv/config';
 import { DerivAuthError, validateAccountsForToken, buildSession } from '@/lib/deriv/auth';
+import type { AccountInfo } from '@/lib/deriv/types';
 import { decryptSession, encryptSession, publicSession, SESSION_COOKIE, sessionExpirySeconds } from '@/lib/oauth/session';
 
 export const dynamic = 'force-dynamic';
@@ -50,7 +51,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, message: `Could not reach Deriv (${(e as Error).message}).` }, { status: 502 });
   }
 
-  const detail = (await res.json().catch(() => null)) as { message?: string; error?: string } | null;
+  const detail = (await res.json().catch(() => null)) as {
+    message?: string;
+    error?: string;
+    data?:
+      | { account_id?: string; currency?: string; balance?: number; account_type?: string }
+      | Array<{ account_id?: string; currency?: string; balance?: number; account_type?: string }>;
+  } | null;
   if (!res.ok) {
     return NextResponse.json(
       {
@@ -64,13 +71,43 @@ export async function POST(req: Request) {
     );
   }
 
-  // Re-read the account list and reissue the session around the new account.
+  // Deriv's create response carries the account itself (201: array, 200: single
+  // object when it already existed). Build the session from THAT - the listing
+  // can lag behind - and only use a re-read to enrich the switcher list.
+  const rawCreated = Array.isArray(detail?.data) ? detail?.data[0] : detail?.data;
+  const createdRow: AccountInfo | null = rawCreated?.account_id
+    ? {
+        account_loginid: rawCreated.account_id,
+        currency: (rawCreated.currency ?? currency).toUpperCase(),
+        balance: Number(rawCreated.balance ?? 0),
+        is_virtual: rawCreated.account_type === 'demo' ? 1 : 0,
+      }
+    : null;
+  if (!createdRow) {
+    return NextResponse.json(
+      { ok: false, message: `Deriv answered HTTP ${res.status} without an account object.` },
+      { status: 502 },
+    );
+  }
   try {
-    const { accounts, scopes } = await validateAccountsForToken(session.accessToken, session.kind);
-    const primary = accounts.find((a) => a.is_virtual !== 1) ?? accounts[0];
+    let accounts: AccountInfo[] = [createdRow];
+    let scopes = session.scopes ?? [];
+    try {
+      const v = await validateAccountsForToken(session.accessToken, session.kind);
+      if (v.accounts.length > 0) {
+        accounts = v.accounts.some((a) => a.account_loginid === createdRow.account_loginid)
+          ? v.accounts
+          : [createdRow, ...v.accounts];
+        scopes = v.scopes;
+      }
+    } catch {
+      /* listing lag is fine: the create response already proved the account */
+    }
+    const primary = accounts.find((a) => a.account_loginid === createdRow.account_loginid) ?? accounts[0];
     const next = {
       ...buildSession(session.kind, primary, scopes, session.expiresAt),
       needsOptionsAccount: undefined,
+      accountsSource: 'options_rest' as const,
       accessToken: session.accessToken,
     };
     const out = NextResponse.json({
