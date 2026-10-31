@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { decryptSession, SESSION_COOKIE } from '@/lib/oauth/session';
+import { decryptSession, encryptSession, SESSION_COOKIE, sessionExpirySeconds } from '@/lib/oauth/session';
 import { DerivAuthError, validateAccountsForToken } from '@/lib/deriv/auth';
 
 export const dynamic = 'force-dynamic';
@@ -20,7 +20,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: 'not_authenticated', message: 'No Deriv session. Connect first.' }, { status: 401 });
   }
   const session = decryptSession(raw);
-  if (!session) {
+  if (!session || (session.expiresAt && session.expiresAt < Date.now())) {
     return NextResponse.json({ ok: false, error: 'session_unreadable', message: 'Session could not be read. Reconnect.' }, { status: 401 });
   }
 
@@ -41,6 +41,7 @@ export async function GET(req: Request) {
         const rows = session.accountRows ?? [];
         return NextResponse.json({
           ok: true,
+          cached: true,
           accounts: rows.map((a) => ({
             loginid: a.account_loginid,
             currency: a.currency,
@@ -54,9 +55,10 @@ export async function GET(req: Request) {
     }
     const merged = new Map((session.accountRows ?? []).map((a) => [a.account_loginid, a]));
     for (const a of accounts) merged.set(a.account_loginid, a);
-    return NextResponse.json({
+    const updated = { ...session, accountRows: Array.from(merged.values()) };
+    const response = NextResponse.json({
       ok: true,
-      accounts: Array.from(merged.values()).map((a) => ({
+      accounts: updated.accountRows.map((a) => ({
         loginid: a.account_loginid,
         currency: a.currency,
         balance: Number(a.balance ?? 0),
@@ -64,6 +66,8 @@ export async function GET(req: Request) {
         accountType: a.account_type ?? null,
       })),
     });
+    response.cookies.set(SESSION_COOKIE, encryptSession(updated), { httpOnly: true, secure: true, sameSite: 'lax', path: '/', maxAge: sessionExpirySeconds(updated) });
+    return response;
   } catch (e) {
     const err = e as DerivAuthError;
     return NextResponse.json(

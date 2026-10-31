@@ -1,3 +1,4 @@
+import { parseOptionsAccounts } from './accountList';
 import { DERIV_APP_ID, accountsEndpoint, otpEndpoint } from './config';
 import type { AdoptedRow } from './authorizeMap';
 
@@ -89,10 +90,8 @@ export async function validateAccountsForToken(
     throw new DerivAuthError(`Deriv returned HTTP ${res.status}.`, 'http_error', res.status);
   }
 
-  const body = (await res.json().catch(() => null)) as
-    | { data?: { accounts?: AccountInfo[] }; accounts?: AccountInfo[] }
-    | null;
-  let accounts = body?.data?.accounts ?? body?.accounts ?? [];
+  const body: unknown = await res.json().catch(() => null);
+  let accounts = parseOptionsAccounts(body);
 
   // An empty Options listing is NOT the end of discovery: the new REST endpoint
   // only knows Options accounts (DOT.../ROT...), while classic CR/VRTC accounts —

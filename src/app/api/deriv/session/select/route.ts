@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { buildSession } from '@/lib/deriv/auth';
+import { buildSession, validateAccountsForToken } from '@/lib/deriv/auth';
 import { decryptSession, encryptSession, publicSession, SESSION_COOKIE, sessionExpirySeconds } from '@/lib/oauth/session';
 import type { AccountInfo } from '@/lib/deriv/types';
 
@@ -33,11 +33,25 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, message: 'No Deriv session. Sign in first.' }, { status: 401 });
   }
 
-  const rows: AccountInfo[] = session.accountRows ?? [];
+  let rows: AccountInfo[] = session.accountRows ?? [];
+  // The listing can change after login. Resolve from Deriv rather than rejecting
+  // a newly discovered real account just because its cookie snapshot is older.
+  try {
+    const { accounts } = await validateAccountsForToken(session.accessToken, session.kind);
+    const merged = new Map(rows.map((a) => [a.account_loginid, a]));
+    for (const account of accounts) merged.set(account.account_loginid, account);
+    rows = [...merged.values()];
+  } catch (e) {
+    if ((e as { code?: string }).code === 'invalid_token') {
+      return NextResponse.json({ ok: false, message: 'Deriv session expired. Sign in again.' }, { status: 401 });
+    }
+    // Existing metadata remains selectable for viewing during transient faults.
+    // Trading permission is independently verified by the socket route.
+  }
   const row = rows.find((r) => r.account_loginid === loginid);
   if (!row) {
     return NextResponse.json(
-      { ok: false, message: `This session has no proof of account ${loginid}. Sync balances or sign in again.` },
+      { ok: false, message: `Deriv has not returned account ${loginid}. Sync balances or sign in again.` },
       { status: 404 },
     );
   }

@@ -32,6 +32,18 @@ afterEach(() => {
 });
 
 describe('validateAccountsForToken', () => {
+  it('does not discard the official data-array Real account or try classic fallback', async () => {
+    const fetchMock = stubAccountsJson({ data: [
+      { account_id: 'DOT93175071', balance: 4172.24, currency: 'USD', account_type: 'demo', group: 'row', status: 'active' },
+      { account_id: 'ROT123456', balance: 0, currency: 'USD', account_type: 'real', group: 'row', status: 'active' },
+    ] });
+    const result = await validateAccountsForToken('synthetic-token', 'oauth');
+    expect(result.source).toBe('options_rest');
+    expect(result.accounts.map((a) => a.account_loginid)).toEqual(['DOT93175071', 'ROT123456']);
+    expect(result.accounts[1].is_virtual).toBe(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects with the stable no_accounts code when the listing is empty', async () => {
     const fetchMock = stubAccountsJson({ data: { accounts: [] } });
     const err = await validateAccountsForToken('a-valid-looking-token', 'oauth').catch((e) => e);

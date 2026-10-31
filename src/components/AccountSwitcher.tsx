@@ -20,12 +20,13 @@ import type { AccountMode } from '@/lib/deriv/types';
  */
 export function AccountSwitcher() {
   const [open, setOpen] = useState(false);
+  const [selectionError, setSelectionError] = useState('');
+  const [selecting, setSelecting] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   const session = useApp((s) => s.session);
   const accounts = useApp((s) => s.accounts);
   const mode = useApp((s) => s.settings.mode);
-  const realAcknowledged = useApp((s) => s.settings.realTradingAcknowledged);
   const dataSource = useApp((s) => s.dataSource);
   const applyMode = useApp((s) => s.applyMode);
   const setSettings = useApp((s) => s.setSettings);
@@ -64,24 +65,36 @@ export function AccountSwitcher() {
   const live = dataSource === 'deriv_live';
 
   const chooseMode = async (m: AccountMode) => {
-    if (session) {
-      const target = accounts.find((a) => a.isVirtual === (m === 'deriv_demo'));
-      if (!target) { pushLog('warn', 'No account of this type is available on this session.'); return; }
-      setOpen(false);
-      const result = await selectAccount(target.loginid);
-      if (!result.ok) pushLog('error', result.message);
-      return;
-    }
-    await setSettings({ mode: m });
-    await applyMode(m);
-    setOpen(false);
+    setSelectionError(''); setSelecting(true);
+    try {
+      if (session) {
+        // Re-read the backend even when only a stale DOT demo row is cached.
+        await useApp.getState().refreshSession(false);
+        const target = useApp.getState().accounts.find((a) => a.isVirtual === (m === 'deriv_demo'));
+        if (!target) {
+          setSelectionError(m === 'deriv_real'
+            ? 'Deriv has not returned a Real account for this sign-in. Try Sync balances or reconnect with the Deriv profile that owns your Real account. No Real account was created.'
+            : 'Deriv has not returned a Demo account for this sign-in. Try Sync balances.');
+          return;
+        }
+        const result = await selectAccount(target.loginid);
+        if (!result.ok) { setSelectionError(result.message); return; }
+        setOpen(false); return;
+      }
+      if (m === 'deriv_real') { setSelectionError('Sign in to load your Real accounts.'); return; }
+      await setSettings({ mode: m }); await applyMode(m); setOpen(false);
+    } catch (error) { setSelectionError((error as Error).message); }
+    finally { setSelecting(false); }
   };
 
   return (
     <div className="relative" ref={ref}>
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          setOpen((v) => !v);
+          if (!open && session) void useApp.getState().refreshSession(false);
+        }}
         aria-expanded={open}
         aria-haspopup="menu"
         className={cn(
@@ -113,10 +126,9 @@ export function AccountSwitcher() {
         >
           {/* --- Feed --- */}
           <div className="border-b border-line p-3">
-            <div className="dt-section-title mb-2">Market feed</div>
+            <div className="dt-section-title mb-2">Switch account</div>
             <div className="flex flex-col gap-1">
               {(['deriv_demo', 'deriv_real'] as const).map((m) => {
-                const locked = m === 'deriv_real' && (!realAcknowledged || !session);
                 return (
                   <button
                     key={m}
@@ -124,24 +136,26 @@ export function AccountSwitcher() {
                     role="menuitemradio"
                     aria-checked={mode === m}
                     onClick={() => void chooseMode(m)}
+                    disabled={selecting || busy === 'switch-account'}
                     className={cn(
                       'flex items-center justify-between gap-2 rounded px-2.5 py-1.5 text-left text-xs transition-colors',
                       mode === m ? 'bg-coral-wash font-bold text-coral' : 'text-general hover:bg-state-hover',
-                      locked && m !== 'deriv_real' && 'opacity-60',
+                      selecting && 'opacity-60',
                     )}
-                    title={m === 'deriv_real' && locked ? 'Requires explicit acknowledgement in Risk settings' : MODE_LABEL[m]}
+                    title={m === 'deriv_real' ? 'View or select a Real account. Trading still requires acknowledgement.' : MODE_LABEL[m]}
                   >
                     <span>{MODE_LABEL[m]}</span>
                     <span className="flex items-center gap-1.5">
-                      {m === 'deriv_real' && locked && <ShieldAlert size={12} className="text-loss" />}
                       {mode === m && <span className={cn('h-1.5 w-1.5 rounded-full', live ? 'bg-profit' : 'bg-blue')} />}
                     </span>
                   </button>
                 );
               })}
             </div>
+            {selecting && <p role="status" className="mt-2 text-xs text-less-prominent">Loading and selecting account…</p>}
+            {selectionError && <p role="alert" className="mt-2 rounded bg-loss-wash p-2 text-xs text-loss">{selectionError}</p>}
             <p className="mt-2 text-xxs leading-relaxed text-less-prominent">
-              Demo and real results are kept separate and are never summed together. Market data streams from Deriv&apos;s public socket even before you log in; placing orders needs a connected account.
+              Selecting a Real account does not enable real-money trading. Orders still require explicit acknowledgement in Risk settings.
             </p>
           </div>
 
@@ -152,6 +166,7 @@ export function AccountSwitcher() {
               <p role="status" className="mb-2 text-xxs text-less-prominent" title={balanceMessage}>
                 {balanceStatus === 'live' ? 'Balance stream connected — rows update when Deriv sends changes' : balanceStatus === 'connecting' ? 'Connecting balances… showing last known values' : 'Balance stream disconnected — last known values'}
               </p>
+              {balanceStatus === 'stale' && balanceMessage && <p role="status" className="mb-2 break-words text-xxs text-loss">{balanceMessage}</p>}
               {accounts.length === 0 ? (
                 <p className="text-xs text-less-prominent">No other accounts on this session.</p>
               ) : (
@@ -170,7 +185,7 @@ export function AccountSwitcher() {
                         setOpen(false);
                         void (async () => {
                           const r = await selectAccount(a.loginid);
-                          if (!r.ok) pushLog('error', r.message);
+                          if (!r.ok) { setSelectionError(r.message); setOpen(true); pushLog('error', r.message); }
                         })();
                       }}
                       className={cn(

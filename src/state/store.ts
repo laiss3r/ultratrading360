@@ -492,6 +492,15 @@ export const useApp = create<State & Actions>()((set, get) => ({
   async syncBalances(): Promise<{ ok: boolean; message: string }> {
     set({ busy: 'sync-balances' });
     try {
+      // Current Options accounts come from REST; do not make their refresh depend
+      // on a legacy socket which may reject the current OAuth credential.
+      const response = await fetch('/api/deriv/accounts', { cache: 'no-store' });
+      const listing = await response.json().catch(() => null);
+      if (response.ok && listing?.ok && !listing.cached && listing.accounts?.length) {
+        set({ accounts: (listing.accounts as AccountSummary[]).map((a) => ({ ...a, ...lastBalances.get(a.loginid) })) });
+        await get().refreshSession(false);
+        return { ok: true, message: 'Account balances refreshed from Deriv.' };
+      }
       await fetch('/api/deriv/handoff/refresh', { method: 'POST', credentials: 'same-origin' });
       const res = await runClassicDiscovery();
       if (res.ok && res.accounts.length > 0) {
