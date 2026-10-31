@@ -21,6 +21,11 @@ async function navigate(path) { await page.goto(base + path); await accountButto
 async function waitVerified() { await page.waitForFunction(() => Array.from(document.querySelectorAll('dd')).some((el) => el.textContent === 'Verified')); }
 async function configurePermission() {
   await navigate('/risk');
+  if (!(await accountButton().getAttribute('aria-label')).includes(loginid)) {
+    await accountButton().click();
+    await page.getByRole('menuitemradio').filter({hasText:loginid}).click();
+    await page.getByRole('menu').waitFor({state:'hidden'});
+  }
   const allow = main.getByRole('switch', { name: 'Allow this browser to place trades' });
   if (!(await allow.isChecked())) await allow.click();
   if (mode === 'real') {
@@ -42,6 +47,7 @@ async function configureBot() {
   await main.getByRole('spinbutton', { name: 'Maximum escalation steps' }).fill('4');
   const recovery = main.getByRole('switch', { name: /Recovery mode/ });
   if (await recovery.isChecked()) await recovery.click();
+  await waitVerified();
 }
 async function confirmRun() {
   await main.getByRole('button', { name: 'Run bot', exact: true }).click();
@@ -63,7 +69,6 @@ async function assertSwitchBlocked() {
 }
 try {
   await page.request.post('http://127.0.0.1:4517/__fixture/reset');
-  await page.goto(base);
   const auth = await page.request.post(base + '/api/deriv/token', { data: { token: 'synthetic-only-token' } });
   if (!auth.ok()) throw new Error(`Synthetic authentication failed: ${auth.status()} ${await auth.text()}`);
   const select = await page.request.post(base + '/api/deriv/session/select', { data: { loginid } });
@@ -72,7 +77,7 @@ try {
   check((await accountButton().getAttribute('aria-label')).includes(loginid), 'verified execution uses explicitly selected environment');
   await configureBot();
   await main.getByRole('button', { name: 'Find market', exact: true }).click();
-  await main.getByText(/2 \/ 2 markets/).waitFor({ timeout: 20000 });
+  await main.getByText(/2 \/ 2 markets/).waitFor({ timeout: 40000 });
   check((await main.innerText()).includes('New live outcomes'), 'scanner shows measured forward-validation evidence');
   check(!(await main.innerText()).includes('84.9% confidence'), 'scanner does not fabricate screenshot confidence');
   await confirmRun();

@@ -27,7 +27,7 @@ Recovery and Martingale remain separate optional controls. Return-after-recovery
 
 ## Fixed qualification policy
 
-- Request 5,000 real history ticks; require at least 1,200 valid ordered ticks.
+- Request 5,000 real history ticks through broker-epoch pagination (the public API was observed silently capping individual responses at 1,000); require at least 1,200 valid ordered ticks.
 - Causal binary suffix candidates of length 1–3. Select on training only (at least 100 matching observations), validate chronologically on held-out history (at least 80), then require at least 30 **new live** matching outcomes. Retain the latest 300 matching forward outcomes.
 - Non-overlapping labels, with historical and forward grids aligned. Rise/Fall labels use future entry at `i+1`, exit at `i+duration+1`; digit labels use exit `i+duration`.
 - Require at least 2 percentage points over the relevant baseline. An adjusted Wilson-style lower bound uses z=3.75 (approximate allowance for 14 patterns × 20 markets). Lower bound × actual gross payout / ask − 1 must be at least 0.02.
@@ -40,17 +40,19 @@ Recovery and Martingale remain separate optional controls. Return-after-recovery
 - Strict finite numeric parsing accepts decimal strings but does not convert null, empty strings or booleans into zero money. Current `entry_spot` / `exit_spot` and legacy spot aliases are supported. Wrong-contract updates are ignored; cancelled contracts are terminal. Broker settlement timestamps are retained.
 - Actual gross return is paid stake plus finite realized broker profit. Potential payout is never counted as realized return on losses, partial sales or refunds. Zero net is shown separately.
 - Priced immutable requests retain currency, duration, barrier and contract through a single-use execution context. Stop/permission/signal checks run after repricing and again after the buying callback.
+- History reads share pacing and bounded exponential rate-limit backoff; Stop scan aborts queued reads/backoff. This never retries purchases. Multi-market loading can take minutes under broker limits; unavailable markets show their actual broker error and cannot qualify. A fresh newest page is fetched after backward pagination so old-page loading does not stale the seed.
 - Independent chart/bot subscription keys and current-ID cleanup prevent a scanner or chart from unsubscribing another consumer. Completed POC subscriptions are forgotten rather than replayed.
 - Selecting genuine Real synchronizes the persisted environment but never silently enables execution. Disabling permission stops new entries while preserving pending settlement; changing Real acknowledgement does not tear down a pending contract socket.
 
 ## Verification
 
-- TypeScript, ESLint, full unit suite: **457 passing** including the current-subscription-ID reconnect regression; production build passed.
+- TypeScript, ESLint, full unit suite: **460 passing** including current-subscription-ID reconnect, history pagination and cancellation/backoff regressions; production build passed.
 - Mobile full-stack browser fixtures: **27 Demo + 27 Real checks passed**. Verified qualification waits, actual chosen socket, decimal-string POC money/current spots, 1 → 2.10 → 4.41 accepted stakes, exact 7.51 paid / 8.60 returned / +1.09 net fixture accounting, target halt, export/account isolation, refresh/reset persistence, and Stop retaining an already-open contract until settlement.
 - Fixture money/results above are **explicitly synthetic test expectations**, not advertised strategy performance. All fixtures are opt-in developer tools; no fixture feeds, simulated trades or fabricated balances are shipped in production.
 - Existing Real-first account regression: **12 synthetic checks passed**, including stale preference, refresh, account switching and mobile overflow.
+- Genuine unauthenticated public-feed check passed for selected R_10 and R_25: paginated history seeded real held-out samples, new live outcomes advanced, cancellation worked, and mobile had no overflow/runtime errors. Broad scanning also exposed broker `ticks_history_expensive` rate limits; these are now paced/backed off and reported rather than bypassed. Seven public workspace routes passed mobile overflow checks.
 - No live authenticated funds/orders were used for these tests. Genuine-account profitability has not been established.
 
 ### Reproduce synthetic integration
 
-Build with `NEXT_PUBLIC_DERIV_API_BASE=http://127.0.0.1:4517` and `NEXT_PUBLIC_DERIV_WS_PUBLIC=ws://127.0.0.1:4519`. Start `tools/derivstub.mjs` with `STUB_TRADING=1 STUB_PATTERNS=1 STUB_REAL_FUNDS=1 STUB_SETTLE_MS=1800`. Run Next with the same endpoint environment and an ephemeral test-only session-cookie key, then run `TEST_MODE=demo node tools/overlord-flow.mjs` and `TEST_MODE=real node tools/overlord-flow.mjs`. The script currently imports the sandbox's Playwright installation; adjust that import for another machine. Never deploy a fixture build. Restore a clean normal production build afterward.
+Build with `NEXT_PUBLIC_DERIV_API_BASE=http://127.0.0.1:4517` and `NEXT_PUBLIC_DERIV_WS_PUBLIC=ws://127.0.0.1:4519`. Start `tools/derivstub.mjs` with `STUB_TRADING=1 STUB_PATTERNS=1 STUB_REAL_FUNDS=1 STUB_SETTLE_MS=1800`. Run Next with the same endpoint environment and an ephemeral test-only session-cookie key, then run `TEST_MODE=demo node tools/overlord-flow.mjs` and `TEST_MODE=real node tools/overlord-flow.mjs`. Set `PLAYWRIGHT_MODULE` to your installed Playwright entry point outside this sandbox. Never deploy a fixture build. Restore a clean normal production build afterward.

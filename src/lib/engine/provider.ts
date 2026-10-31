@@ -81,7 +81,7 @@ export interface MarketProvider {
   disconnect(): void;
   isConnected(): boolean;
   /** Prime the provider with `count` historical quotes. */
-  history(symbol: string, count: number): Promise<Quote[]>;
+  history(symbol: string, count: number, signal?: AbortSignal): Promise<Quote[]>;
   /** Subscribe to live quotes. Returns a disposer. */
   stream(symbol: string, onQuote: (q: Quote) => void): Promise<() => void>;
   /** Price a contract from a real Deriv proposal. */
@@ -154,9 +154,9 @@ export class DerivProvider implements MarketProvider {
     return this.marketSvc.activeSymbols(productType);
   }
 
-  async history(symbol: string, count: number): Promise<Quote[]> {
+  async history(symbol: string, count: number, signal?: AbortSignal): Promise<Quote[]> {
     if (!this.isConnected()) throw new Error('Deriv socket is not connected.');
-    const { ticks, pipSize } = await this.marketSvc.ticksHistory(symbol, count);
+    const { ticks, pipSize } = await this.marketSvc.ticksHistory(symbol, count, signal);
     this.pipSizes.set(symbol, pipSize);
     return ticks.map((t: Tick) => ({
       symbol,

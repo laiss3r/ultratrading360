@@ -112,7 +112,7 @@ market.on('connection', (ws, req) => {
     if (process.env.STUB_TRADING === '1' && m.ticks_history) {
       let seed=38231;const randomDigit=()=>{seed=(seed*1664525+1013904223)>>>0;return (seed>>>16)%10;};
       const prices=Array.from({length:Math.min(m.count||300,5000)},(_,i)=>100+(process.env.STUB_PATTERNS==='1'?(m.ticks_history==='R_10'?(i%2?8:1):randomDigit()):(m.ticks_history==='R_10'?(i%10===0?2:1):i%10))/100);
-      const end=Math.floor(Date.now()/1000);
+      const end=m.end&&m.end!=='latest'?Number(m.end):Math.floor(Date.now()/1000);
       return ws.send(JSON.stringify({req_id:m.req_id,msg_type:'history',pip_size:2,history:{prices,times:prices.map((_,i)=>end-prices.length+i+1)}}));
     }
     if (process.env.STUB_TRADING === '1' && m.active_symbols) return ws.send(JSON.stringify({req_id:m.req_id,msg_type:'active_symbols',active_symbols:[10,25].map((n)=>({underlying_symbol:`R_${n}`,underlying_symbol_name:`Fixture Volatility ${n}`,market:'synthetic_index',submarket:'random_index',exchange_is_open:1,is_trading_suspended:0,pip_size:2,trade_count:1}))}));
