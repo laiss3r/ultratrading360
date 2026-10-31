@@ -65,6 +65,8 @@ export interface PriceRequest {
 export interface ExecuteOptions {
   /** True only when the socket is authorized for the account being traded. */
   authorized: boolean;
+  /** Rechecked immediately before buy, after the broker reprices. */
+  shouldExecute?: () => boolean;
 }
 
 export interface MarketProvider {
@@ -93,6 +95,7 @@ export class DerivProvider implements MarketProvider {
   private contractSvc: ContractService;
   private tradingSvc: TradingService;
   private pipSizes = new Map<string, number>();
+  private pricedRequests = new WeakMap<PricedContract, PriceRequest>();
 
   constructor(
     public readonly mode: 'deriv_demo' | 'deriv_real',
@@ -191,7 +194,7 @@ export class DerivProvider implements MarketProvider {
       durationUnit: req.durationUnit,
       barrier: req.barrier,
     });
-    return {
+    const priced: PricedContract = {
       stake: Number(proposal.ask_price),
       payout: Number(proposal.payout),
       askPrice: Number(proposal.ask_price),
@@ -200,22 +203,23 @@ export class DerivProvider implements MarketProvider {
       barrier: req.barrier,
       source: 'deriv_live',
     };
+    this.pricedRequests.set(priced, Object.freeze({ ...req }));
+    return priced;
   }
 
   async execute(priced: PricedContract, opts: ExecuteOptions): Promise<SettledContract> {
     if (!this.isConnected()) {
       throw new Error('Deriv socket dropped — refusing to report a trade that was not placed.');
     }
+    const context = this.pricedRequests.get(priced);
+    if (!context) throw new Error('Missing or already consumed pricing context; refusing an unverified purchase.');
+    this.pricedRequests.delete(priced);
     const req: BuyRequest = {
-      underlying: priced.symbol,
-      contractType: priced.contractType,
-      stake: priced.stake,
-      currency: 'USD',
-      duration: 1,
-      durationUnit: 't',
-      barrier: priced.barrier,
+      underlying: context.symbol, contractType: context.contractType,
+      stake: priced.stake, currency: context.currency,
+      duration: context.duration, durationUnit: context.durationUnit, barrier: context.barrier,
     };
-    const trade = await this.tradingSvc.buy(req, { authorized: opts.authorized });
+    const trade = await this.tradingSvc.buy(req, { authorized: opts.authorized, maxAcceptablePrice: priced.askPrice, shouldExecute: opts.shouldExecute });
     const settled = await this.tradingSvc.watchContract(trade.contractId);
     const profit = Number(settled.profit ?? (settled.is_sold === 1 ? Number(settled.payout) - trade.buyPrice : 0));
     return {

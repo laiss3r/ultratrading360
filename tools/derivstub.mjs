@@ -24,10 +24,16 @@ const CLASSIC_LIST = [
   { loginid: 'CR1234567', currency: 'USD', balance: 0, is_virtual: 0 },
 ];
 
+const tradeLog = [];
+const proposals = new Map();
+const contracts = new Map();
+let proposalIndex = 0, contractIndex = 0;
 let getCalls = 0;
 http
   .createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
+    if (process.env.STUB_TRADING === '1' && url.pathname === '/__fixture/reset' && req.method === 'POST') {tradeLog.length=0;proposals.clear();contracts.clear();proposalIndex=0;contractIndex=0;res.writeHead(200);return res.end('{}');}
+    if (process.env.STUB_TRADING === '1' && url.pathname === '/__fixture/trades') { res.writeHead(200, {'content-type':'application/json'}); return res.end(JSON.stringify(tradeLog)); }
     if (url.pathname.endsWith('/otp') && req.method === 'POST') {
       const id = url.pathname.split('/').at(-2);
       res.writeHead(200, { 'content-type': 'application/json' });
@@ -81,29 +87,52 @@ console.log('stub legacy WS on 4518');
 
 const market = new WebSocketServer({ port: 4519, host: '127.0.0.1' });
 market.on('connection', (ws, req) => {
-  let tickTimer = null;
+  const tickTimers = new Map();
+  let balanceReq = null;
+  let fixtureBalance = req.url.includes('DOT') ? 10000 : 0;
   ws.on('message', (raw) => {
     const m = JSON.parse(raw.toString());
     if (m.ping) return ws.send(JSON.stringify({ msg_type: 'ping', ping: m.ping }));
-    if (m.balance) return ws.send(JSON.stringify({req_id:m.req_id, subscription:{id:'balance'}, balance:{balance:req.url.includes('DOT') ? 10000 : 0,currency:'USD'}}));
+    if (m.balance) { balanceReq=m; return ws.send(JSON.stringify({req_id:m.req_id, subscription:{id:'balance'}, balance:{balance:fixtureBalance,currency:'USD'}})); }
+    if (process.env.STUB_TRADING === '1' && m.proposal) {
+      const id=`fixture-proposal-${++proposalIndex}`;proposals.set(id,{...m});
+      return ws.send(JSON.stringify({req_id:m.req_id,msg_type:'proposal',proposal:{id,ask_price:m.amount,payout:Math.round(m.amount*1.95*100)/100,spot:100,spot_value:'100.00',date_start:1700000000,date_expiry:1700000003,longcode:'Synthetic fixture only'}}));
+    }
+    if (process.env.STUB_TRADING === '1' && m.buy) {
+      if(req.url.includes('public'))return ws.send(JSON.stringify({req_id:m.req_id,error:{code:'AuthorizationRequired',message:'Fixture requires account socket'}}));
+      const proposal=proposals.get(m.buy);const id=++contractIndex;contracts.set(id,proposal);tradeLog.push({...proposal,contract_id:id,price:m.price});
+      return ws.send(JSON.stringify({req_id:m.req_id,msg_type:'buy',buy:{contract_id:id,buy_price:proposal.amount,payout:Math.round(proposal.amount*1.95*100)/100,longcode:'Synthetic fixture only',currency:proposal.currency,start_time:1700000000}}));
+    }
+    if (process.env.STUB_TRADING === '1' && m.proposal_open_contract) {
+      const proposal=contracts.get(m.contract_id);const won=m.contract_id>2;const profit=won?Math.round(proposal.amount*.95*100)/100:-proposal.amount;
+      const frame={req_id:m.req_id,msg_type:'proposal_open_contract',subscription:{id:`fixture-contract-${m.contract_id}`},proposal_open_contract:{contract_id:m.contract_id,is_sold:0,status:'open',buy_price:proposal.amount,profit:0,payout:0,currency:proposal.currency}};ws.send(JSON.stringify(frame));
+      setTimeout(()=>{if(ws.readyState!==1)return;fixtureBalance=Math.round((fixtureBalance+profit)*100)/100;ws.send(JSON.stringify({...frame,proposal_open_contract:{...frame.proposal_open_contract,is_sold:1,status:won?'won':'lost',profit,payout:won?Math.round(proposal.amount*1.95*100)/100:0}}));if(balanceReq)ws.send(JSON.stringify({req_id:balanceReq.req_id,subscription:{id:'balance'},balance:{balance:fixtureBalance,currency:'USD'}}));},350);return;
+    }
+    if (process.env.STUB_TRADING === '1' && m.ticks_history) {
+      const prices=Array.from({length:Math.min(m.count||300,1000)},(_,i)=>100+(m.ticks_history==='R_10'?(i%10===0?2:1):i%10)/100);
+      return ws.send(JSON.stringify({req_id:m.req_id,msg_type:'history',pip_size:2,history:{prices,times:prices.map((_,i)=>1700000000+i)}}));
+    }
+    if (process.env.STUB_TRADING === '1' && m.active_symbols) return ws.send(JSON.stringify({req_id:m.req_id,msg_type:'active_symbols',active_symbols:[10,25].map((n)=>({underlying_symbol:`R_${n}`,underlying_symbol_name:`Fixture Volatility ${n}`,market:'synthetic_index',submarket:'random_index',exchange_is_open:1,is_trading_suspended:0,pip_size:2,trade_count:1}))}));
     if (m.ticks_history) return ws.send(JSON.stringify({ req_id: m.req_id, msg_type: 'history', pip_size: 2, history: { prices: [1234.50,1234.55,1234.60], times: [1700000000,1700000001,1700000002] } }));
     if (m.active_symbols) return ws.send(JSON.stringify({req_id:m.req_id,msg_type:'active_symbols',active_symbols:[]}));
-    if (m.forget || m.forget_all) return ws.send(JSON.stringify({req_id:m.req_id,forget:1}));
-    if (m.ticks && !tickTimer) {
+    if (m.forget || m.forget_all) {if(m.forget_all){for(const timer of tickTimers.values())clearInterval(timer);tickTimers.clear();}else {clearInterval(tickTimers.get(m.forget));tickTimers.delete(m.forget);}return ws.send(JSON.stringify({req_id:m.req_id,forget:1}));}
+    if (m.ticks) {
+      const subId = `fixture-ticks-${m.req_id}`;
       let q = 1234.5;
-      tickTimer = setInterval(() => {
+      const tickTimer = setInterval(() => {
         q += 0.5;
         ws.send(
           JSON.stringify({
             req_id: m.req_id,
             msg_type: 'tick',
-            tick: { symbol: m.ticks, quote: q, epoch: Math.floor(Date.now() / 1000), id: 'stub' },
-            subscription: { id: 'stub-sub' },
+            tick: { symbol: m.ticks, quote: q, pip_size: 2, epoch: Math.floor(Date.now() / 1000), id: subId },
+            subscription: { id: subId },
           }),
         );
       }, 250);
+      tickTimers.set(subId, tickTimer);
     }
   });
-  ws.on('close', () => tickTimer && clearInterval(tickTimer));
+  ws.on('close', () => {for (const timer of tickTimers.values()) clearInterval(timer);});
 });
 console.log('stub market WS on 4519');

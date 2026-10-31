@@ -8,7 +8,7 @@ import { DERIV_APP_ID } from '@/lib/deriv/config';
 import { DerivProvider, type MarketProvider, type Quote } from '@/lib/engine/provider';
 import { RiskManager, type RiskSnapshot } from '@/lib/engine/risk';
 import { TradingBot, type BotState, type TradeRecord } from '@/lib/engine/bot';
-import { createStrategy, validateStrategy, type Strategy } from '@/lib/engine/strategies';
+import { createStrategy, effectiveStrategyLimits, validateStrategy, type Strategy } from '@/lib/engine/strategies';
 import { computeMetrics, type PerformanceMetrics } from '@/lib/metrics';
 import {
   DEFAULT_SETTINGS,
@@ -257,7 +257,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
     // The risk manager is the single source of truth for limits; keep it in sync.
     next.limits = { ...next.limits, realTradingAcknowledged: next.realTradingAcknowledged };
     set({ settings: next });
-    get().risk.limits = next.limits;
+    get().risk.limits = get().bot ? effectiveStrategyLimits(next.limits, get().bot!.strategy) : next.limits;
     get().risk.recovery = next.recovery;
     set({ riskSnapshot: get().risk.getSnapshot() });
     await saveSettings(next);
@@ -444,7 +444,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
    *  The choice is persisted server-side (session cookie) AND as a local pref, so
    *  every route, reload and tab agrees on the active account. */
   async selectAccount(loginid: string, opts?: { silent?: boolean }): Promise<{ ok: boolean; message: string }> {
-    if (['starting', 'running', 'paused', 'stopping'].includes(get().botState)) return { ok: false, message: 'Stop the bot before switching accounts.' };
+    if (get().bot?.hasPendingOrder() || ['starting', 'running', 'paused', 'stopping'].includes(get().botState)) return { ok: false, message: 'Stop the bot before switching accounts.' };
     const acct = get().accounts.find((a) => a.loginid === loginid);
     if (!acct) return { ok: false, message: 'Unknown account. Sync balances or sign in again.' };
     if (get().busy) return { ok: false, message: 'Another account operation is in progress.' };
@@ -796,6 +796,8 @@ export const useApp = create<State & Actions>()((set, get) => ({
         message: 'No Deriv account is connected. Connect a demo or real account before running a bot — this tool trades only on Deriv.',
       };
     }
+    if (provider.mode !== (get().session!.isVirtual ? 'deriv_demo' : 'deriv_real') || mode !== provider.mode) return { ok: false, message: 'The account environment and trading provider do not match. Reconnect before running.' };
+    if (s.currency !== get().session!.currency) return { ok: false, message: 'Strategy currency does not match the selected account. Review the setup.' };
     if (get().tradingLoginid !== get().session?.loginid) {
       return { ok: false, message: 'No verified trading connection for the selected account. Reconnect, and acknowledge Real trading in Risk settings if applicable.' };
     }
@@ -805,12 +807,12 @@ export const useApp = create<State & Actions>()((set, get) => ({
     if (mode === 'deriv_real' && (!get().settings.realTradingAcknowledged || get().settings.acknowledgedAccountLoginid !== get().session?.loginid)) {
       return { ok: false, message: 'Real-money trading is not acknowledged. Confirm it in Risk settings.' };
     }
-    if (get().bot && get().botState === 'running') {
+    if (get().bot?.hasPendingOrder() || ['starting','running','paused','stopping'].includes(get().botState)) {
       return { ok: false, message: 'A bot is already running. Stop it first — only one bot runs at a time to prevent duplicate orders.' };
     }
 
     const startingBalance = get().session?.balance ?? 0;
-    const risk = new RiskManager(get().settings.limits, get().settings.recovery, startingBalance);
+    const risk = new RiskManager(effectiveStrategyLimits(get().settings.limits, s), s.progression ? { ...s.recovery, enabled: false } : s.recovery, startingBalance);
 
     const bot = new TradingBot(s, provider, risk, {
       onStateChange: (st, detail) => {
@@ -837,7 +839,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
       },
     }, startingBalance);
 
-    set({ bot, activeStrategyId: id, botState: 'starting', botDetail: '' });
+    set({ bot, risk, riskSnapshot: risk.getSnapshot(), activeStrategyId: id, botState: 'starting', botDetail: '' });
     try {
       await bot.start(800);
       set({ botRuns: get().botRuns + 1 });

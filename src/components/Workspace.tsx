@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { ArrowUpRight, Download, Play, Square, Pause, ChevronRight, ShieldCheck } from 'lucide-react';
 import { useApp } from '@/state/store';
+import { effectiveStrategyLimits } from '@/lib/engine/strategies';
 import type { Quote } from '@/lib/engine/provider';
 import { Button, Empty, Notice, Panel } from './ui';
 
@@ -52,18 +53,27 @@ export function DigitDistribution() {
   return <div><div className="digit-bars" aria-label="Observed last-digit frequency">{counts.map((count,d) => <div className="digit-column" key={d}><span>{sample.length ? `${(count/sample.length*100).toFixed(1)}%` : '—'}</span><div className="digit-track"><i style={{height:`${count/max*100}%`}} /></div><b>{d}</b></div>)}</div><p className="micro muted">{sample.length} observed digits · Past frequencies do not predict the next tick.</p></div>;
 }
 
-export function RunButton({ strategyId, children = 'Run strategy' }: { strategyId: string; children?: string }) {
+export function RunButton({ strategyId, prepare, children = 'Run strategy' }: { strategyId?: string; prepare?: () => Promise<string>; children?: string }) {
+  const [preparedId, setPreparedId] = useState<string | null>(null);
+  const currentId = preparedId ?? strategyId;
   const [confirm, setConfirm] = useState(false);
   const [message, setMessage] = useState('');
   const [pending, setPending] = useState(false);
   const session = useApp((s)=>s.session);
-  const strategy = useApp((s)=>s.strategies.find((x)=>x.id===strategyId));
+  const strategy = useApp((s)=>s.strategies.find((x)=>x.id===currentId));
+  const globalLimits = useApp((s)=>s.settings.limits);
+  const limits = strategy ? effectiveStrategyLimits(globalLimits, strategy) : null;
+  const open = async () => {
+    setMessage('');
+    try { if (prepare) { setPending(true); setPreparedId(await prepare()); } setConfirm(true); }
+    catch (e) { setMessage((e as Error).message); } finally { setPending(false); }
+  };
   const run = async () => {
     setPending(true); setMessage('');
-    try { const result = await useApp.getState().runStrategy(strategyId); if(result.ok) setConfirm(false); else setMessage(result.message); }
+    try { const result = await useApp.getState().runStrategy(currentId ?? ''); if(result.ok) setConfirm(false); else setMessage(result.message); }
     catch(e) { setMessage((e as Error).message); } finally { setPending(false); }
   };
-  return <><Button onClick={()=>setConfirm(true)}><Play size={14}/>{children}</Button>{confirm && <div className="modal-backdrop" onClick={()=>!pending&&setConfirm(false)}><div role="dialog" aria-modal="true" aria-labelledby={`confirm-${strategyId}`} className="confirm-dialog" onClick={(e)=>e.stopPropagation()}><span className="eyebrow">CONFIRM BEFORE TRADING</span><h2 id={`confirm-${strategyId}`}>{strategy?.name ?? 'Run strategy'}</h2><p>This starts genuine Deriv orders on <strong>{session ? `${session.loginid} (${session.isVirtual?'Demo':'REAL MONEY'})` : 'no connected account'}</strong>. Open contracts may still settle after stopping.</p><dl className="detail-list"><div><dt>Base stake</dt><dd>{strategy?money(strategy.stake,strategy.currency):'—'}</dd></div><div><dt>Contract</dt><dd>{strategy?.contractType}</dd></div><div><dt>Maximum entries</dt><dd>{strategy?.maxTrades}</dd></div></dl>{message&&<Notice tone="error">{message}</Notice>}<div className="button-row"><Button busy={pending} onClick={()=>void run()}>Confirm & run</Button><Button variant="secondary" disabled={pending} onClick={()=>setConfirm(false)}>Cancel</Button></div><Link className="text-link" href="/risk" onClick={()=>setConfirm(false)}>Review trading permissions →</Link></div></div>}</>;
+  return <><Button busy={pending} onClick={()=>void open()}><Play size={14}/>{children}</Button>{message&&!confirm&&<Notice tone="error">{message}</Notice>}{confirm && <div className="modal-backdrop" onClick={()=>!pending&&setConfirm(false)}><div role="dialog" aria-modal="true" aria-labelledby={`confirm-${currentId}`} className="confirm-dialog" onClick={(e)=>e.stopPropagation()}><span className="eyebrow">CONFIRM BEFORE TRADING</span><h2 id={`confirm-${currentId}`}>{strategy?.name ?? 'Run strategy'}</h2><p>This starts genuine Deriv orders on <strong>{session ? `${session.loginid} (${session.isVirtual?'Demo':'REAL MONEY'})` : 'no connected account'}</strong>. Open contracts may still settle after stopping.</p><dl className="detail-list"><div><dt>Base stake</dt><dd>{strategy?money(strategy.stake,strategy.currency):'—'}</dd></div><div><dt>Contract</dt><dd>{strategy?.contractType}{strategy?.barrier!==undefined?` · ${strategy.barrier}`:''}</dd></div><div><dt>Duration</dt><dd>{strategy?.duration} {strategy?.durationUnit==='t'?'ticks':strategy?.durationUnit}</dd></div><div><dt>Maximum entries</dt><dd>{limits?.maxTrades}</dd></div><div><dt>Profit target / stop loss</dt><dd>{limits?.maxSessionProfit || 'Off'} / {limits?.maxSessionLoss}</dd></div><div><dt>Stake plan / maximum stake</dt><dd>{strategy?.progression?.kind ?? 'Fixed'} / {limits?.maxStake}</dd></div>{strategy?.contractRotation&&<div><dt>Recovery contract</dt><dd>{strategy.contractRotation.recovery.contractType} · {strategy.contractRotation.mode}</dd></div>}</dl>{message&&<Notice tone="error">{message}</Notice>}<div className="button-row"><Button busy={pending} onClick={()=>void run()}>Confirm & run</Button><Button variant="secondary" disabled={pending} onClick={()=>setConfirm(false)}>Cancel</Button></div><Link className="text-link" href="/risk" onClick={()=>setConfirm(false)}>Review trading permissions →</Link></div></div>}</>;
 }
 
 export function SessionRail() {

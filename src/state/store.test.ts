@@ -22,13 +22,13 @@ describe('shared identity and execution boundary',()=>{
   });
   it.each([null,'ANOTHER_ACCOUNT'])('never executes from a public or mismatched trading channel (%s)',async(tradingLoginid)=>{
     const strategy=createStrategy();
-    useApp.setState({session:real,tradingLoginid,strategies:[strategy],provider:{isConnected:()=>true} as MarketProvider,settings:{...DEFAULT_SETTINGS,limits:{...DEFAULT_SETTINGS.limits,tradingEnabled:true}}});
+    useApp.setState({session:real,tradingLoginid,strategies:[strategy],provider:{mode:'deriv_real',isConnected:()=>true} as MarketProvider,settings:{...DEFAULT_SETTINGS,mode:'deriv_real',limits:{...DEFAULT_SETTINGS.limits,tradingEnabled:true}}});
     const result=await useApp.getState().runStrategy(strategy.id);
     expect(result.ok).toBe(false);expect(result.message).toContain('No verified trading connection');expect(useApp.getState().bot).toBeNull();
   });
   it('rejects acknowledgement belonging to another Real identity',async()=>{
     const strategy=createStrategy();
-    useApp.setState({session:real,tradingLoginid:real.loginid,strategies:[strategy],provider:{isConnected:()=>true} as MarketProvider,settings:{...DEFAULT_SETTINGS,mode:'deriv_real',realTradingAcknowledged:true,acknowledgedAccountLoginid:'ROT_OTHER',limits:{...DEFAULT_SETTINGS.limits,tradingEnabled:true}}});
+    useApp.setState({session:real,tradingLoginid:real.loginid,strategies:[strategy],provider:{mode:'deriv_real',isConnected:()=>true} as MarketProvider,settings:{...DEFAULT_SETTINGS,mode:'deriv_real',realTradingAcknowledged:true,acknowledgedAccountLoginid:'ROT_OTHER',limits:{...DEFAULT_SETTINGS.limits,tradingEnabled:true}}});
     expect((await useApp.getState().runStrategy(strategy.id)).message).toContain('not acknowledged');
   });
 });

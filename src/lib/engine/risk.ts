@@ -149,6 +149,20 @@ export class RiskManager {
     this.snap.sessionExposure += stake;
   }
 
+  /** Recheck an order without counting its own existing reservation twice. */
+  evaluateReserved(stake: number, mode: AccountMode): RiskDecision {
+    this.releaseReservation(stake);
+    const decision = this.evaluate(stake, mode);
+    this.openExposure(stake);
+    return decision;
+  }
+
+  /** Only for a purchase definitively cancelled before buy; no outcome is invented. */
+  releaseReservation(stake: number) {
+    this.snap.openExposure = Math.max(0, this.snap.openExposure - stake);
+    this.snap.sessionExposure = Math.max(0, this.snap.sessionExposure - stake);
+  }
+
   /** Called when a contract settles. */
   closeExposure(stake: number, profit: number, now = new Date()) {
     this.rollDay(now);

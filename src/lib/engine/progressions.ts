@@ -37,6 +37,8 @@ export interface ProgressionConfig {
   unit: number;
   /** Multiplier for the Martingale family. Deriv's default is 2. */
   multiplier?: number;
+  /** Optional cap on consecutive Martingale escalation steps. */
+  stepLimit?: number;
 }
 
 /** A settled trade's outcome. `profit` is net, so it already reflects the real payout. */
@@ -77,13 +79,13 @@ export function progressionStake(cfg: ProgressionConfig, history: TradeOutcome[]
     case 'martingale': {
       // Double up after each loss; a single win resets the sequence.
       const losses = trailingRun(history, false);
-      return clampRound(unit * Math.pow(m, losses));
+      return clampRound(unit * Math.pow(m, Math.min(losses, cfg.stepLimit ?? losses)));
     }
 
     case 'reverse_martingale': {
       // The mirror image: press the stake after wins, reset after a loss.
       const wins = trailingRun(history, true);
-      return clampRound(unit * Math.pow(m, wins));
+      return clampRound(unit * Math.pow(m, Math.min(wins, cfg.stepLimit ?? wins)));
     }
 
     case 'dalembert': {

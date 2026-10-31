@@ -1,6 +1,8 @@
 import { DerivClient, DerivApiError } from './client';
 import { ContractService, type ContractType } from './contracts';
-import type { OpenContract, Proposal } from './types';
+import type { DerivMessage, OpenContract, Proposal } from './types';
+
+export class OrderCancelledError extends Error { constructor(){super('Order cancelled before purchase.');this.name='OrderCancelledError';} }
 
 export interface BuyRequest {
   underlying: string;
@@ -41,7 +43,7 @@ export class TradingService {
 
   async buy(
     req: BuyRequest,
-    opts: { authorized: boolean; maxAcceptablePrice?: number; minAcceptablePayout?: number },
+    opts: { authorized: boolean; maxAcceptablePrice?: number; minAcceptablePayout?: number; shouldExecute?: () => boolean },
   ): Promise<ExecutedTrade> {
     if (!opts.authorized) {
       throw new Error('REFUSED: buy() requires an explicit authorization from the risk manager.');
@@ -72,6 +74,8 @@ export class TradingService {
       );
     }
 
+    if (opts.shouldExecute && !opts.shouldExecute()) throw new OrderCancelledError();
+
     // 3. Buy by proposal id.
     let res: { buy: { buy_price: number; contract_id: number; payout: number; longcode: string; currency: string; start_time?: number; purchase_time?: number } };
     try {
@@ -100,29 +104,24 @@ export class TradingService {
   watchContract(contractId: number, onUpdate?: (c: OpenContract) => void): Promise<OpenContract> {
     return new Promise((resolve, reject) => {
       let settled = false;
-      this.client
-        .subscribe(
-          { proposal_open_contract: 1, contract_id: contractId },
-          (m) => {
-            const c = m.proposal_open_contract as OpenContract | undefined;
-            if (!c) return;
-            onUpdate?.(c);
-            if (c.is_sold === 1 || c.status === 'sold' || c.status === 'won' || c.status === 'lost') {
-              if (settled) return;
-              settled = true;
-              resolve(c);
-            }
-          },
-          `poc_${contractId}`,
-        )
-        .catch(reject);
-      // Safety net: never hang forever if the stream stalls.
-      setTimeout(() => {
-        if (!settled) {
-          settled = true;
-          reject(new Error(`Timed out waiting for contract ${contractId} to settle.`));
-        }
+      let subId: string | null = null;
+      const timeout = setTimeout(() => {
+        if (!settled) { settled = true; reject(new Error(`Timed out waiting for contract ${contractId} to settle.`)); }
       }, 10 * 60 * 1000);
+      const handle = (m: DerivMessage) => {
+        if (settled) return;
+        const c = m.proposal_open_contract as OpenContract | undefined;
+        if (!c) return;
+        onUpdate?.(c);
+        if (c.is_sold === 1 || ['sold','won','lost'].includes(c.status)) {
+          settled = true; clearTimeout(timeout);
+          if (subId) void this.client.forget(subId, `poc_${contractId}`);
+          resolve(c);
+        }
+      };
+      this.client.subscribe({ proposal_open_contract: 1, contract_id: contractId }, handle, `poc_${contractId}`)
+        .then((first) => { subId = first.subscription?.id ?? null; handle(first); })
+        .catch((error) => { settled = true; clearTimeout(timeout); reject(error); });
     });
   }
 

@@ -1,3 +1,4 @@
+import { validateLeg, type ContractRotation } from './rotation';
 import type { ConditionGroup } from './conditions';
 import type { ProgressionConfig } from './progressions';
 import { validateGroup } from './conditions';
@@ -34,6 +35,7 @@ export interface Strategy {
    * never out-run the user's own exposure limits.
    */
   progression?: ProgressionConfig;
+  contractRotation?: ContractRotation;
   notes?: string;
 }
 
@@ -67,6 +69,7 @@ export function createStrategy(partial: Partial<Strategy> = {}): Strategy {
     limits: { ...DEFAULT_RISK_LIMITS, ...(partial.limits ?? {}) },
     recovery: { ...DEFAULT_RECOVERY, ...(partial.recovery ?? {}) },
     progression: partial.progression,
+    contractRotation: partial.contractRotation,
     notes: partial.notes,
   };
 }
@@ -100,7 +103,20 @@ export function validateStrategy(s: Strategy): StrategyValidation {
     warnings.push('DIGITODD/DIGITEVEN ignore the barrier field.');
   }
 
-  errors.push(...validateGroup(s.entry));
+  errors.push(...validateGroup(s.entry), ...validateLeg(s));
+  if (s.contractRotation) {
+    errors.push(...validateLeg(s.contractRotation.recovery));
+    if (!['return-after-recovery', 'switch-on-loss', 'alternate'].includes(s.contractRotation.mode)) errors.push('Invalid contract rotation mode.');
+    if (!Number.isInteger(s.contractRotation.alternateTimes) || s.contractRotation.alternateTimes < 1 || s.contractRotation.alternateTimes > 5) errors.push('Contract alternation must be 1–5 settled entries.');
+  }
+  if (s.progression) {
+    if (!['flat','martingale','reverse_martingale','dalembert','reverse_dalembert','oscars_grind','one_three_two_six'].includes(s.progression.kind)) errors.push('Invalid stake progression.');
+    if (!Number.isFinite(s.progression.unit) || s.progression.unit <= 0) errors.push('Progression stake must be finite and positive.');
+    if (s.progression.multiplier !== undefined && (!Number.isFinite(s.progression.multiplier) || s.progression.multiplier <= 1)) errors.push('Progression multiplier must be finite and greater than 1.');
+    if (s.progression.stepLimit !== undefined && (!Number.isInteger(s.progression.stepLimit) || s.progression.stepLimit < 1 || s.progression.stepLimit > 10)) errors.push('Progression step limit must be 1–10.');
+  }
+  for (const [key,value] of Object.entries(s.limits)) if (typeof value === 'number' && (!Number.isFinite(value) || value < 0)) errors.push(`Invalid risk limit: ${key}.`);
+  if (!Number.isFinite(s.stake) || !Number.isFinite(s.cooldownSeconds) || !Number.isInteger(s.maxTrades)) errors.push('Strategy amounts and entry count must be finite.');
 
   if (s.stake > s.limits.maxStake) {
     errors.push(`Stake ${s.stake} exceeds limits.maxStake ${s.limits.maxStake} — the risk manager will refuse every trade.`);
@@ -122,4 +138,19 @@ export function validateStrategy(s: Strategy): StrategyValidation {
 /** Save-time versioning: bump version and updatedAt, keep id/createdAt. */
 export function bumpVersion(s: Strategy, patch: Partial<Strategy>): Strategy {
   return { ...s, ...patch, id: s.id, createdAt: s.createdAt, version: s.version + 1, updatedAt: Date.now() };
+}
+
+
+/** Per-bot settings may tighten global caps, never relax permissions or safety limits. */
+export function effectiveStrategyLimits(global: RiskLimits, strategy: Strategy): RiskLimits {
+  const next = { ...global };
+  const caps: (keyof RiskLimits)[] = ['maxStake','maxOpenExposure','maxSessionExposure','maxTrades','maxSessionLoss','maxDailyLoss'];
+  for (const key of caps) (next as unknown as Record<string,number|boolean>)[key] = Math.min(global[key] as number, strategy.limits[key] as number);
+  const positiveMin = (a:number,b:number) => a > 0 && b > 0 ? Math.min(a,b) : Math.max(a,b);
+  next.minStake = Math.max(global.minStake, strategy.limits.minStake);
+  next.maxSessionProfit = positiveMin(global.maxSessionProfit, strategy.limits.maxSessionProfit);
+  next.maxDrawdownPct = positiveMin(global.maxDrawdownPct, strategy.limits.maxDrawdownPct);
+  next.maxTrades = Math.min(next.maxTrades, strategy.maxTrades);
+  next.maxSessionExposure = Math.min(next.maxSessionExposure, strategy.maxExposure);
+  return next;
 }

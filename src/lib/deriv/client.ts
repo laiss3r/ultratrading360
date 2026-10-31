@@ -273,7 +273,12 @@ export class DerivClient {
   }
 
   /** Cancel one subscription. */
-  async forget(subscriptionId: string): Promise<void> {
+  async forget(subscriptionId: string, replayKey?: string): Promise<void> {
+    if (replayKey) {
+      const handler = this.subscriptionHandlers.get(replayKey);
+      this.replayable.delete(replayKey);
+      if (handler) for (const [key, value] of this.subscriptionHandlers) if (value === handler) this.subscriptionHandlers.delete(key);
+    }
     for (const [k, req] of this.replayable) {
       if (JSON.stringify(req).includes(subscriptionId)) this.replayable.delete(k);
     }

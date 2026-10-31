@@ -48,3 +48,18 @@ The 11-check run starts from an existing Demo-only session, verifies automatic
 additional discovery and actual all-account balances, then checks Real selection,
 reload/navigation persistence, refresh retention and independent trading rejection.
 No live account or live trade is used.
+
+## Overlord sequential execution fixture (TEST ONLY)
+
+`tools/overlord-flow.mjs` exercises the real browser engine against the opt-in
+synthetic upstream, **never live funds**. Start `tools/derivstub.mjs` with
+`STUB_TRADING=1 STUB_DEMO_ONLY=1`; build/start Next with the fixture public WS and
+REST overrides documented above. The test server additionally needs
+`DERIV_LEGACY_WS_HOSTS=ws://127.0.0.1:4518` and a local-only session secret.
+Run `PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs node tools/overlord-flow.mjs`.
+It resets the fixture-only ledger, logs in with a dummy value, enables the local
+Demo permission, scans, explicitly confirms, and verifies three settled requests:
+stakes 1/2.10/4.41, contracts EVEN/OVER/OVER, duration 3 and a 1.09 profit halt.
+The fixture has private-loopback `/__fixture/trades` and `/__fixture/reset` endpoints
+only when STUB_TRADING is enabled. Stop both servers and make a **clean build
+without the fixture overrides** before production deployment.

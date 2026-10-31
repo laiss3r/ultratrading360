@@ -59,3 +59,11 @@ describe('account scoped WebSocket lifecycle', () => {
     await expect(connected).rejects.toThrow('connection error'); c.close();
   });
 });
+
+it('does not replay a completed contract after its named subscription is forgotten',async()=>{
+  const c=new DerivClient({url:'wss://example.test'});const connected=c.connect();Socket.instances[0].open();await connected;
+  const sub=c.subscribe({proposal_open_contract:1,contract_id:123},()=>{},'poc_123');const first=Socket.instances[0].sent.at(-1)!;
+  Socket.instances[0].message({req_id:first.req_id,subscription:{id:'settled-contract'},proposal_open_contract:{is_sold:1}});await sub;
+  const forgotten=c.forget('settled-contract','poc_123');const forget=Socket.instances[0].sent.at(-1)!;Socket.instances[0].message({req_id:forget.req_id,forget:1});await forgotten;
+  Socket.instances[0].close();await vi.advanceTimersByTimeAsync(800);Socket.instances[1].open();expect(Socket.instances[1].sent.some((r)=>r.proposal_open_contract)).toBe(false);c.close();
+});

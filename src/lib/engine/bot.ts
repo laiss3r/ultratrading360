@@ -4,6 +4,8 @@ import { evaluateGroup, type DigitWindow } from './conditions';
 import { RiskManager, type RiskDecision } from './risk';
 import type { Strategy } from './strategies';
 import { validateStrategy } from './strategies';
+import { OrderCancelledError } from '../deriv/trading';
+import { nextContract } from './rotation';
 import { progressionStake } from './progressions';
 
 export type BotState = 'idle' | 'starting' | 'running' | 'paused' | 'stopping' | 'stopped' | 'halted' | 'error';
@@ -95,6 +97,8 @@ export class TradingBot {
   getState(): { state: BotState; detail: string } {
     return { state: this.state, detail: this.detail };
   }
+  hasPendingOrder(): boolean { return this.inFlight !== null; }
+
   getTrades(): TradeRecord[] {
     return [...this.trades];
   }
@@ -136,11 +140,18 @@ export class TradingBot {
       this.risk.setEquity(this.balance);
 
       const dispose = await this.provider.stream(this.strategy.market, (q) => {
-        this.handleQuote(q).catch((e) => {
+        this.events.onQuote?.(q);
+        if (q.symbol !== this.strategy.market || this.state !== 'running') return;
+        this.digits.push(q.digit); if (this.digits.length > 5000) this.digits.shift();
+        this.prices.push(q.price); if (this.prices.length > 5000) this.prices.shift();
+        this.pipSize = q.pipSize;
+        // Exactly one quote -> proposal -> buy -> settlement chain at a time.
+        if (this.inFlight) return;
+        this.inFlight = Promise.resolve().then(() => this.handleQuote(q)).catch((e) => {
           this.events.onError?.(e as Error);
           this.setState('error', (e as Error).message);
           this.teardownStream();
-        });
+        }).finally(() => { this.inFlight = null; });
       });
       this.stopDisposer = dispose;
       this.setState('running');
@@ -184,14 +195,7 @@ export class TradingBot {
   }
 
   private async handleQuote(q: Quote) {
-    this.events.onQuote?.(q);
-    if (this.state !== 'running') return; // paused/stopping/stopped/halted => no orders
-
-    this.digits.push(q.digit);
-    if (this.digits.length > 5000) this.digits.shift();
-    this.prices.push(q.price);
-    if (this.prices.length > 5000) this.prices.shift();
-    this.pipSize = q.pipSize;
+    if (this.state !== 'running') return;
 
     // Cooldown
     const now = Date.now();
@@ -217,7 +221,7 @@ export class TradingBot {
     const baseStake = progression
       ? progressionStake(
           progression,
-          this.trades.map((t) => ({ won: t.won, profit: t.profit })),
+          this.trades.filter((t) => !t.error).map((t) => ({ won: t.profit > 0, profit: t.profit })),
         )
       : this.strategy.stake;
     const suggested = progression ? baseStake : this.risk.suggestRecoveryStake(baseStake);
@@ -245,19 +249,30 @@ export class TradingBot {
     const index = this.tradeIndex++;
     const balanceBefore = this.balance;
 
+    const leg = nextContract(this.strategy, this.strategy.contractRotation, this.trades.filter((t) => !t.error));
+    let reservedStake = 0;
     let record: TradeRecord;
     try {
       const priced = await this.provider.price({
         symbol: this.strategy.market,
-        contractType: this.strategy.contractType,
+        contractType: leg.contractType,
         stake: decision.stake,
         duration: this.strategy.duration,
         durationUnit: this.strategy.durationUnit,
-        barrier: this.strategy.barrier !== undefined ? String(this.strategy.barrier) : undefined,
+        barrier: leg.barrier !== undefined ? String(leg.barrier) : undefined,
         currency: this.strategy.currency,
       });
+      // Stop/permission changes can arrive while a proposal is pending.
+      if (this.state !== 'running') return;
+      const finalRisk = this.risk.evaluate(priced.stake, mode);
+      if (!finalRisk.allowed || Math.abs(finalRisk.stake - priced.stake) > 1e-8) {
+        this.events.onRisk?.(finalRisk);
+        if (finalRisk.halt) { this.setState('halted', finalRisk.reasons.join(' ')); this.teardownStream(); }
+        return;
+      }
       this.risk.openExposure(priced.stake);
-      const settled: SettledContract = await this.provider.execute(priced, { authorized: true });
+      reservedStake = priced.stake;
+      const settled: SettledContract = await this.provider.execute(priced, { authorized: true, shouldExecute: () => { const d = this.risk.evaluateReserved(priced.stake, mode); return this.state === 'running' && d.allowed && Math.abs(d.stake - priced.stake) < 1e-8; } });
       this.risk.closeExposure(priced.stake, settled.profit);
       this.balance = round2(this.balance + settled.profit);
       this.risk.setEquity(this.balance);
@@ -269,7 +284,7 @@ export class TradingBot {
         strategyName: this.strategy.name,
         strategyVersion: this.strategy.version,
         symbol: this.strategy.market,
-        contractType: this.strategy.contractType,
+        contractType: leg.contractType,
         barrier: priced.barrier,
         stake: priced.stake,
         payout: settled.payout,
@@ -289,6 +304,7 @@ export class TradingBot {
         gateReasons: gate.reasons,
       };
     } catch (e) {
+      if (e instanceof OrderCancelledError) { this.risk.releaseReservation(reservedStake); return; }
       const msg = (e as Error).message;
       record = {
         id: `tr_err_${Date.now().toString(36)}_${index}`,
@@ -297,8 +313,8 @@ export class TradingBot {
         strategyName: this.strategy.name,
         strategyVersion: this.strategy.version,
         symbol: this.strategy.market,
-        contractType: this.strategy.contractType,
-        barrier: this.strategy.barrier !== undefined ? String(this.strategy.barrier) : undefined,
+        contractType: leg.contractType,
+        barrier: leg.barrier !== undefined ? String(leg.barrier) : undefined,
         stake: 0,
         payout: 0,
         profit: 0,
@@ -315,7 +331,7 @@ export class TradingBot {
       };
       this.events.onError?.(e as Error);
       // A fatal authorization/connection problem must stop the bot, not loop forever.
-      if (/NOT AUTHORIZED|socket|connection|INSUFFICIENT FUNDS/i.test(msg)) {
+      { // An uncertain order outcome must not trigger automatic duplicate buys.
         this.setState('halted', msg);
         this.teardownStream();
       }
@@ -325,9 +341,13 @@ export class TradingBot {
     this.trades.push(record);
     this.events.onTrade?.(record);
 
-    if (this.trades.filter((t) => !t.error).length >= this.strategy.maxTrades) {
+    if (this.state === 'running' && this.trades.filter((t) => !t.error).length >= this.strategy.maxTrades) {
       this.setState('halted', `maxTrades (${this.strategy.maxTrades}) reached`);
       this.teardownStream();
+    }
+    if (this.state === 'running') {
+      const after = this.risk.evaluate(this.strategy.stake, mode);
+      if (after.halt) { this.setState('halted', `${after.haltReason}: ${after.reasons.join(' ')}`); this.teardownStream(); }
     }
   }
 }
