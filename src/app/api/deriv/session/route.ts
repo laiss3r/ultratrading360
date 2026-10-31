@@ -48,7 +48,7 @@ export async function GET(req: Request) {
   }
 
   try {
-    const accounts = await validateAccountsForToken(session.accessToken, session.kind);
+    const { accounts } = await validateAccountsForToken(session.accessToken, session.kind);
     const current = accounts.find((a) => a.account_loginid === session.loginid) ?? accounts[0];
     const updated: StoredSession = {
       ...session,

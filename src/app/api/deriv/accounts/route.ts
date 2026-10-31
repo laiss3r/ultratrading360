@@ -25,7 +25,7 @@ export async function GET() {
   }
 
   try {
-    const accounts = await validateAccountsForToken(session.accessToken, session.kind);
+    const { accounts } = await validateAccountsForToken(session.accessToken, session.kind);
     return NextResponse.json({
       ok: true,
       accounts: accounts.map((a) => ({

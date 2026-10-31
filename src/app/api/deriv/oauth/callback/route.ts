@@ -87,8 +87,9 @@ export async function POST(req: Request) {
   }
 
   let accounts;
+  let scopes: string[];
   try {
-    accounts = await validateAccountsForToken(token.accessToken, 'oauth');
+    ({ accounts, scopes } = await validateAccountsForToken(token.accessToken, 'oauth'));
   } catch (e) {
     const err = e as DerivAuthError;
     return fail(err.code ?? 'account_fetch_failed', err.message, 401);
@@ -99,7 +100,7 @@ export async function POST(req: Request) {
   const primary = accounts.find((a) => a.is_virtual !== 1) ?? accounts[0];
   const expiresAt = token.expiresIn > 0 ? Date.now() + token.expiresIn * 1000 : null;
   const session = {
-    ...buildSession('oauth', primary, ['trade', 'account_manage', 'application_read'], expiresAt),
+    ...buildSession('oauth', primary, scopes, expiresAt),
     accessToken: token.accessToken,
   };
 

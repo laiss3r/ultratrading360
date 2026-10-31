@@ -1,4 +1,5 @@
 import { DERIV_APP_ID, accountsEndpoint, otpEndpoint } from './config';
+import { accountsFromAuthorizePayload, authorizeViaSocket, scopesFromAuthorizePayload } from './wsAuthorize';
 import type { AccountInfo, AuthSession } from './types';
 
 export class DerivAuthError extends Error {
@@ -38,7 +39,7 @@ function authHeaders(token: string, kind: 'pat' | 'oauth'): Record<string, strin
 export async function validateAccountsForToken(
   token: string,
   kind: 'pat' | 'oauth',
-): Promise<AccountInfo[]> {
+): Promise<{ accounts: AccountInfo[]; scopes: string[] }> {
   const trimmed = token.trim();
   if (!trimmed) throw new DerivAuthError('Token is empty.', 'empty_token');
   if (trimmed.length < 8) {
@@ -89,24 +90,38 @@ export async function validateAccountsForToken(
   const body = (await res.json().catch(() => null)) as
     | { data?: { accounts?: AccountInfo[] }; accounts?: AccountInfo[] }
     | null;
-  const accounts = body?.data?.accounts ?? body?.accounts ?? [];
+  let accounts = body?.data?.accounts ?? body?.accounts ?? [];
+  let scopes: string[] | null = null;
+
+  // The REST listing can come back empty for tokens whose scopes or portal
+  // generation it does not cover. The socket authorize call is the canonical
+  // Deriv authentication call and always echoes the authorized loginid, so it
+  // is the fallback before anyone is told they have "no accounts".
+  if (!Array.isArray(accounts) || accounts.length === 0) {
+    const authorize = await authorizeViaSocket(trimmed);
+    accounts = accountsFromAuthorizePayload(authorize);
+    scopes = scopesFromAuthorizePayload(authorize);
+  }
+
   if (!Array.isArray(accounts) || accounts.length === 0) {
     throw new DerivAuthError(
-      'The token authenticated but returned no trading accounts. It may lack read access, or the Deriv account has no options wallet.',
+      'The token authenticated but returned no trading accounts from either the REST listing or the socket authorize call. It may lack read access, or the Deriv account has no options wallet.',
       'no_accounts',
     );
   }
-  return accounts;
+  return {
+    accounts,
+    scopes: scopes ?? (kind === 'pat' ? [...MINIMUM_READ_SCOPES] : ['trade', 'account_manage', 'application_read']),
+  };
 }
 
 /** Convenience wrapper for the PAT login path. */
 export async function validatePat(token: string): Promise<{ accounts: AccountInfo[]; scopes: string[] }> {
-  const accounts = await validateAccountsForToken(token, 'pat');
-  // The current REST contract does not echo scopes on the accounts response; the successful
-  // 2xx itself proves read access. Trade capability is verified separately at buy time, and
-  // an unprivileged token fails there with an explicit NOT AUTHORIZED error rather than being
+  const { accounts, scopes } = await validateAccountsForToken(token, 'pat');
+  // Trade capability is verified separately at buy time, and an unprivileged
+  // token fails there with an explicit NOT AUTHORIZED error rather than being
   // assumed usable.
-  return { accounts, scopes: [...MINIMUM_READ_SCOPES] };
+  return { accounts, scopes };
 }
 
 /** Build the session record the UI displays. Never contains the token. */

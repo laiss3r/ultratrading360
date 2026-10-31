@@ -33,12 +33,12 @@ export function Card({
   return (
     <section className={cn('dt-card flex flex-col overflow-hidden', className)}>
       {(title || right) && (
-        <header className="flex items-start justify-between gap-3 border-b border-line px-4 py-2.5">
+        <header className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1.5 border-b border-line px-4 py-2.5">
           <div className="min-w-0">
             <h2 className="truncate text-sm font-bold text-prominent">{title}</h2>
             {subtitle && <p className="mt-0.5 text-xs leading-snug text-less-prominent">{subtitle}</p>}
           </div>
-          {right && <div className="shrink-0">{right}</div>}
+          {right && <div className="min-w-0 max-w-full shrink-0 max-sm:basis-full">{right}</div>}
         </header>
       )}
       <div className={cn('min-h-0 flex-1', pad && 'p-4')}>{children}</div>

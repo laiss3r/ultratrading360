@@ -81,8 +81,20 @@ export interface OpenContract {
   transaction_ids?: { buy?: string; sell?: string };
 }
 
+/** One row of an authorize response's account_list. Deriv echoes `loginid`
+ * here (not `account_loginid`, which is the REST accounts listing's field), so
+ * the mapper accepts both. */
+export interface AuthorizeAccountEntry {
+  loginid?: string;
+  account_loginid?: string;
+  account_type?: string;
+  currency?: string;
+  balance?: number;
+  is_virtual?: 0 | 1;
+}
+
 export interface AuthorizeResult {
-  account_list?: AccountInfo[];
+  account_list?: AuthorizeAccountEntry[];
   balance?: number;
   currency?: string;
   loginid?: string;
