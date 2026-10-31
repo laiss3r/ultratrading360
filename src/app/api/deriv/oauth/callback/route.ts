@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { getOAuthClientId, getRedirectUri } from '@/lib/deriv/config';
-import { buildSession, DerivAuthError, exchangeAuthorizationCode, validateAccountsForToken } from '@/lib/deriv/auth';
+import { buildNoAccountsSession, buildSession, DerivAuthError, exchangeAuthorizationCode, validateAccountsForToken } from '@/lib/deriv/auth';
+import type { AccountInfo } from '@/lib/deriv/types';
 import { safeEqual } from '@/lib/oauth/pkce';
 import {
   encryptSession,
@@ -86,38 +87,36 @@ export async function POST(req: Request) {
     return fail(err.code ?? 'token_exchange_failed', err.message, 400);
   }
 
-  let accounts;
-  let scopes: string[];
+  let accounts: AccountInfo[] = [];
+  let scopes: string[] = [];
+  let noAccounts = false;
   try {
     ({ accounts, scopes } = await validateAccountsForToken(token.accessToken, 'oauth'));
   } catch (e) {
     const err = e as DerivAuthError;
-    return fail(err.code ?? 'account_fetch_failed', err.message, 401);
+    if (err.code !== 'no_accounts') {
+      return fail(err.code ?? 'account_fetch_failed', err.message, 401);
+    }
+    // Authenticated token, zero Options accounts: a legitimate state on the new
+    // platform, not a failed sign-in. Fall through to the flagged session below.
+    noAccounts = true;
   }
 
   // Prefer a real account for display, but never silently promote one: the UI shows every
   // account and requires an explicit selection before real trading is enabled.
   const primary = accounts.find((a) => a.is_virtual !== 1) ?? accounts[0];
   const expiresAt = token.expiresIn > 0 ? Date.now() + token.expiresIn * 1000 : null;
-  const session = {
-    ...buildSession(
-      'oauth',
-      primary ?? { account_loginid: '', currency: 'USD', balance: 0, is_virtual: 1 },
-      scopes,
-      expiresAt,
-    ),
-    // A valid token with zero Options accounts is still a connection: the new
-    // platform keeps Options accounts separate from classic Deriv loginids, so
-    // many profiles legitimately have none until one is created. The UI offers
-    // the demo creation explicitly; nothing is created behind anyone's back.
-    needsOptionsAccount: accounts.length === 0 ? true : undefined,
-    accessToken: token.accessToken,
-  };
+  const session = noAccounts
+    ? { ...buildNoAccountsSession('oauth', expiresAt), accessToken: token.accessToken }
+    : {
+        ...buildSession('oauth', primary as AccountInfo, scopes, expiresAt),
+        accessToken: token.accessToken,
+      };
 
   const res = NextResponse.json({
     ok: true,
     session: publicSession(session),
-    needsOptionsAccount: accounts.length === 0,
+    needsOptionsAccount: noAccounts,
     accounts: accounts.map((a) => ({
       loginid: a.account_loginid,
       currency: a.currency,

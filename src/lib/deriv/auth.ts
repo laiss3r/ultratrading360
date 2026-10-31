@@ -1,5 +1,5 @@
 import { DERIV_APP_ID, accountsEndpoint, otpEndpoint } from './config';
-import { accountsFromAuthorizePayload, authorizeViaSocket, scopesFromAuthorizePayload } from './wsAuthorize';
+
 import type { AccountInfo, AuthSession } from './types';
 
 export class DerivAuthError extends Error {
@@ -90,28 +90,35 @@ export async function validateAccountsForToken(
   const body = (await res.json().catch(() => null)) as
     | { data?: { accounts?: AccountInfo[] }; accounts?: AccountInfo[] }
     | null;
-  let accounts = body?.data?.accounts ?? body?.accounts ?? [];
-  let scopes: string[] | null = null;
+  const accounts = body?.data?.accounts ?? body?.accounts ?? [];
 
-  // The REST listing can come back empty for tokens whose scopes or portal
-  // generation it does not cover. The socket authorize call is the canonical
-  // Deriv authentication call and always echoes the authorized loginid, so it
-  // is the fallback before anyone is told they have "no accounts".
-  if (!Array.isArray(accounts) || accounts.length === 0) {
-    const authorize = await authorizeViaSocket(trimmed);
-    accounts = accountsFromAuthorizePayload(authorize);
-    scopes = scopesFromAuthorizePayload(authorize);
-  }
-
+  // An empty listing is NOT an error condition on the new platform: Options trading
+  // accounts (DOT.../ROT...) are created separately from classic CR/VRTC loginids and
+  // the new WebSocket authenticates via OTP, so there is no socket call that could
+  // rescue it either. Callers decide what an authenticated-but-accountless token
+  // means: the OAuth callback and PAT login both turn it into a flagged session that
+  // offers the explicit demo-account creation step instead of a failed sign-in.
   if (!Array.isArray(accounts) || accounts.length === 0) {
     throw new DerivAuthError(
-      'The token authenticated but returned no trading accounts from either the REST listing or the socket authorize call. It may lack read access, or the Deriv account has no options wallet.',
+      'Deriv authenticated this token, but the profile has no Options trading account on the new platform yet. Options accounts are created separately from classic Deriv accounts — the Connect page offers the free demo creation step.',
       'no_accounts',
     );
   }
   return {
     accounts,
-    scopes: scopes ?? (kind === 'pat' ? [...MINIMUM_READ_SCOPES] : ['trade', 'account_manage', 'application_read']),
+    scopes: kind === 'pat' ? [...MINIMUM_READ_SCOPES] : ['trade', 'account_manage', 'application_read'],
+  };
+}
+
+/**
+ * Session for a token that Deriv authenticated but whose profile holds no Options
+ * trading account yet. Placeholder identity, flagged so the UI offers the explicit
+ * creation step; carries no token of its own — the caller attaches the real one.
+ */
+export function buildNoAccountsSession(kind: 'pat' | 'oauth', expiresAt: number | null): AuthSession {
+  return {
+    ...buildSession(kind, { account_loginid: '', currency: 'USD', balance: 0, is_virtual: 1 }, [], expiresAt),
+    needsOptionsAccount: true,
   };
 }
 

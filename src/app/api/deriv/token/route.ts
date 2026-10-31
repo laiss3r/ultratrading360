@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { buildSession, DerivAuthError, validatePat } from '@/lib/deriv/auth';
+import { buildNoAccountsSession, buildSession, DerivAuthError, validatePat } from '@/lib/deriv/auth';
 import { encryptSession, publicSession, SESSION_COOKIE, sessionExpirySeconds } from '@/lib/oauth/session';
+import type { AccountInfo } from '@/lib/deriv/types';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -30,15 +31,27 @@ export async function POST(req: Request) {
   }
 
   try {
-    const { accounts, scopes } = await validatePat(raw);
+    let accounts: AccountInfo[] = [];
+    let scopes: string[] = [];
+    let noAccounts = false;
+    try {
+      ({ accounts, scopes } = await validatePat(raw));
+    } catch (e) {
+      const err = e as DerivAuthError;
+      if (err.code !== 'no_accounts') throw err;
+      noAccounts = true; // authenticated PAT, profile without an Options account yet
+    }
     const primary = accounts.find((a) => a.is_virtual !== 1) ?? accounts[0];
     // PATs carry no expiry we can read from the API; cap the local session at 8 hours so a
     // stale cookie cannot outlive a revoked token by much.
-    const session = { ...buildSession('pat', primary, scopes, null), accessToken: raw.trim() };
+    const session = noAccounts
+      ? { ...buildNoAccountsSession('pat', null), accessToken: raw.trim() }
+      : { ...buildSession('pat', primary as AccountInfo, scopes, null), accessToken: raw.trim() };
 
     const res = NextResponse.json({
       ok: true,
       session: publicSession(session),
+      needsOptionsAccount: noAccounts,
       accounts: accounts.map((a) => ({
         loginid: a.account_loginid,
         currency: a.currency,
