@@ -81,7 +81,7 @@ export interface AuthorizeParams {
   scope: string[];
   state: string;
   codeChallenge: string;
-  prompt?: 'registration';
+  prompt?: 'registration' | 'none';
 }
 
 /** Build the Deriv authorization URL. */

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AlertTriangle, Check, Copy, ExternalLink, KeyRound, LogOut, ShieldCheck, Unplug } from 'lucide-react';
 import { Badge, Banner, Button, Card, Field, Toggle } from '@/components/ui';
 import { useApp } from '@/state/store';
@@ -22,6 +22,26 @@ export default function ConnectPage() {
   const s = useApp();
   const [token, setToken] = useState('');
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [probe, setProbe] = useState<{ registered: boolean | null; detail: string } | null>(null);
+
+  // Live, session-free answer to "is the redirect URI we send actually on this
+  // app's registered list?" — the single most common cause of Deriv bouncing a
+  // login attempt, and invisible from the browser until now.
+  useEffect(() => {
+    if (!s.oauthConfigured) return;
+    let alive = true;
+    void fetch('/api/deriv/oauth/check')
+      .then((r) => r.json())
+      .then((j: { registered: boolean | null; detail: string }) => {
+        if (alive) setProbe({ registered: j.registered, detail: j.detail });
+      })
+      .catch(() => {
+        if (alive) setProbe({ registered: null, detail: 'Probe request failed.' });
+      });
+    return () => {
+      alive = false;
+    };
+  }, [s.oauthConfigured]);
 
   async function submitPat() {
     setResult(null);
@@ -53,13 +73,32 @@ export default function ConnectPage() {
             {s.oauthConfigured ? (
               <>
                 <div className="rounded border border-line bg-section-1 p-2.5">
-                  <div className="dt-section-title mb-1">Redirect URI this site sends to Deriv</div>
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <div className="dt-section-title">Redirect URI this site sends to Deriv</div>
+                    <Badge tone={probe?.registered === true ? 'profit' : probe?.registered === false ? 'loss' : 'warn'}>
+                      {probe == null
+                        ? 'CHECKING…'
+                        : probe.registered === true
+                          ? 'REGISTERED ON DERIV'
+                          : probe.registered === false
+                            ? 'NOT REGISTERED ON DERIV'
+                            : 'CHECK INCONCLUSIVE'}
+                    </Badge>
+                  </div>
                   <div className="flex items-center gap-2">
                     <code className="num min-w-0 flex-1 break-all text-xxs leading-snug text-prominent">
                       {s.redirectUri || '—'}
                     </code>
                     <CopyRedirectUri value={s.redirectUri} />
                   </div>
+                  {probe?.registered === false && (
+                    <Banner tone="warn">
+                      <strong className="font-bold">Live check: Deriv does not have this URI registered.</strong> {probe.detail}{' '}
+                      Until it is added — developers.deriv.com → your app → redirect URLs, and make sure the app is the{' '}
+                      <em>OAuth</em> type, because PAT-type apps carry no redirect URLs — &ldquo;Continue with Deriv&rdquo; cannot
+                      succeed. The Personal Access Token path below works right now, with no registration at all.
+                    </Banner>
+                  )}
                   <p className="mt-1.5 text-xxs leading-relaxed text-less-prominent">
                     OAuth 2.0 matches this string exactly — scheme, host, path and trailing slash all count. If pressing
                     &ldquo;Continue with Deriv&rdquo; lands on <code className="num">home.deriv.com/dashboard/error</code> with{' '}
