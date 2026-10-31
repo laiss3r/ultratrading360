@@ -37,6 +37,7 @@ describe('accounts from an authorize payload', () => {
 
   it('reads scopes when Deriv echoes them', () => {
     expect(scopesFromAuthorizePayload({ scopes: ['trade', 'read'] })).toEqual(['trade', 'read']);
+    expect(scopesFromAuthorizePayload({ scope: 'read trade account_manage' })).toEqual(['read', 'trade', 'account_manage']);
     expect(scopesFromAuthorizePayload({ scopes: [] })).toBeNull();
     expect(scopesFromAuthorizePayload(null)).toBeNull();
   });

@@ -65,6 +65,7 @@ export async function GET(req: Request) {
       balance: Number(current.balance ?? session.balance),
       currency: current.currency ?? session.currency,
       isVirtual: current.is_virtual === 1 || session.isVirtual,
+      needsOptionsAccount: undefined,
     };
     const res = NextResponse.json({ authenticated: true, session: publicSession(updated) });
     res.cookies.set(SESSION_COOKIE, encryptSession(updated), cookieOptions(sessionExpirySeconds(updated)));

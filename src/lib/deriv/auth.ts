@@ -1,6 +1,7 @@
 import { DERIV_APP_ID, accountsEndpoint, otpEndpoint } from './config';
 
 import type { AccountInfo, AuthSession } from './types';
+import { accountsFromAuthorizePayload, authorizeViaSocket, scopesFromAuthorizePayload } from './wsAuthorize';
 
 export class DerivAuthError extends Error {
   constructor(
@@ -39,7 +40,7 @@ function authHeaders(token: string, kind: 'pat' | 'oauth'): Record<string, strin
 export async function validateAccountsForToken(
   token: string,
   kind: 'pat' | 'oauth',
-): Promise<{ accounts: AccountInfo[]; scopes: string[] }> {
+): Promise<{ accounts: AccountInfo[]; scopes: string[]; source: 'options_rest' | 'classic_ws' }> {
   const trimmed = token.trim();
   if (!trimmed) throw new DerivAuthError('Token is empty.', 'empty_token');
   if (trimmed.length < 8) {
@@ -90,23 +91,38 @@ export async function validateAccountsForToken(
   const body = (await res.json().catch(() => null)) as
     | { data?: { accounts?: AccountInfo[] }; accounts?: AccountInfo[] }
     | null;
-  const accounts = body?.data?.accounts ?? body?.accounts ?? [];
+  let accounts = body?.data?.accounts ?? body?.accounts ?? [];
 
-  // An empty listing is NOT an error condition on the new platform: Options trading
-  // accounts (DOT.../ROT...) are created separately from classic CR/VRTC loginids and
-  // the new WebSocket authenticates via OTP, so there is no socket call that could
-  // rescue it either. Callers decide what an authenticated-but-accountless token
-  // means: the OAuth callback and PAT login both turn it into a flagged session that
-  // offers the explicit demo-account creation step instead of a failed sign-in.
+  // An empty Options listing is NOT the end of discovery: the new REST endpoint
+  // only knows Options accounts (DOT.../ROT...), while classic CR/VRTC accounts —
+  // the ones every Deriv client's switcher shows — come from the legacy socket
+  // authorize call. Try it (hardened handshake + host failover) before anyone is
+  // told they have no accounts.
+  let source: 'options_rest' | 'classic_ws' = 'options_rest';
+  let scopes: string[] | null = null;
+  if (!Array.isArray(accounts) || accounts.length === 0) {
+    const authorize = await authorizeViaSocket(trimmed);
+    const classic = accountsFromAuthorizePayload(authorize);
+    if (classic.length > 0) {
+      accounts = classic;
+      scopes = scopesFromAuthorizePayload(authorize);
+      source = 'classic_ws';
+    }
+  }
+
+  // Authenticated token, zero accounts on BOTH paths: a legitimate state on the
+  // new platform. Callers turn it into a flagged session that offers the explicit
+  // demo-account creation step instead of failing the sign-in.
   if (!Array.isArray(accounts) || accounts.length === 0) {
     throw new DerivAuthError(
-      'Deriv authenticated this token, but the profile has no Options trading account on the new platform yet. Options accounts are created separately from classic Deriv accounts — the Connect page offers the free demo creation step.',
+      'Deriv authenticated this token, but the profile has no trading account on either the new Options listing or the classic account list yet. The Connect page offers the free demo creation step.',
       'no_accounts',
     );
   }
   return {
     accounts,
-    scopes: kind === 'pat' ? [...MINIMUM_READ_SCOPES] : ['trade', 'account_manage', 'application_read'],
+    scopes: scopes ?? (kind === 'pat' ? [...MINIMUM_READ_SCOPES] : ['trade', 'account_manage', 'application_read']),
+    source,
   };
 }
 
@@ -123,12 +139,12 @@ export function buildNoAccountsSession(kind: 'pat' | 'oauth', expiresAt: number 
 }
 
 /** Convenience wrapper for the PAT login path. */
-export async function validatePat(token: string): Promise<{ accounts: AccountInfo[]; scopes: string[] }> {
-  const { accounts, scopes } = await validateAccountsForToken(token, 'pat');
+export async function validatePat(token: string): Promise<{ accounts: AccountInfo[]; scopes: string[]; source: 'options_rest' | 'classic_ws' }> {
+  const { accounts, scopes, source } = await validateAccountsForToken(token, 'pat');
   // Trade capability is verified separately at buy time, and an unprivileged
   // token fails there with an explicit NOT AUTHORIZED error rather than being
   // assumed usable.
-  return { accounts, scopes };
+  return { accounts, scopes, source };
 }
 
 /** Build the session record the UI displays. Never contains the token. */

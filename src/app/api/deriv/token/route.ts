@@ -34,8 +34,9 @@ export async function POST(req: Request) {
     let accounts: AccountInfo[] = [];
     let scopes: string[] = [];
     let noAccounts = false;
+    let source: 'options_rest' | 'classic_ws' = 'options_rest';
     try {
-      ({ accounts, scopes } = await validatePat(raw));
+      ({ accounts, scopes, source } = await validatePat(raw));
     } catch (e) {
       const err = e as DerivAuthError;
       if (err.code !== 'no_accounts') throw err;
@@ -46,7 +47,7 @@ export async function POST(req: Request) {
     // stale cookie cannot outlive a revoked token by much.
     const session = noAccounts
       ? { ...buildNoAccountsSession('pat', null), accessToken: raw.trim() }
-      : { ...buildSession('pat', primary as AccountInfo, scopes, null), accessToken: raw.trim() };
+      : { ...buildSession('pat', primary as AccountInfo, scopes, null), accountsSource: source, accessToken: raw.trim() };
 
     const res = NextResponse.json({
       ok: true,

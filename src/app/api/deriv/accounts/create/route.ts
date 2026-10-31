@@ -93,6 +93,19 @@ export async function POST(req: Request) {
     return out;
   } catch (e) {
     const err = e as DerivAuthError;
+    if (err.code === 'no_accounts') {
+      // Deriv accepted the request but the listing has not caught up yet (or the
+      // profile can only hold classic accounts). Keep the session as it was and
+      // tell the user the truth instead of a scary failure.
+      return NextResponse.json({
+        ok: true,
+        pending: true,
+        session: publicSession(session),
+        accounts: [],
+        message:
+          'Deriv accepted the request, but the new account is not in the listing yet. Stay signed in and reload in a minute - or use the classic accounts already shown in the switcher.',
+      });
+    }
     return NextResponse.json(
       { ok: false, message: err.message ?? 'The account was created but the session could not be refreshed. Sign in again.' },
       { status: 500 },

@@ -90,8 +90,9 @@ export async function POST(req: Request) {
   let accounts: AccountInfo[] = [];
   let scopes: string[] = [];
   let noAccounts = false;
+  let source: 'options_rest' | 'classic_ws' = 'options_rest';
   try {
-    ({ accounts, scopes } = await validateAccountsForToken(token.accessToken, 'oauth'));
+    ({ accounts, scopes, source } = await validateAccountsForToken(token.accessToken, 'oauth'));
   } catch (e) {
     const err = e as DerivAuthError;
     if (err.code !== 'no_accounts') {
@@ -110,6 +111,7 @@ export async function POST(req: Request) {
     ? { ...buildNoAccountsSession('oauth', expiresAt), accessToken: token.accessToken }
     : {
         ...buildSession('oauth', primary as AccountInfo, scopes, expiresAt),
+        accountsSource: source,
         accessToken: token.accessToken,
       };
 

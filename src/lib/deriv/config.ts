@@ -59,6 +59,14 @@ export type OAuthScope = (typeof OAUTH_SCOPES)[number];
 export function otpEndpoint(accountId: string): string {
   return `${DERIV_API_BASE}/trading/v1/options/accounts/${encodeURIComponent(accountId)}/otp`;
 }
+/** Legacy v3 socket hosts, in failover order. Overridable for tests/offline runs. */
+export function legacyWsHosts(): string[] {
+  return (process.env.DERIV_LEGACY_WS_HOSTS ?? 'ws.derivws.com,ws.binaryws.com,wss.derivws.com')
+    .split(',')
+    .map((h) => h.trim())
+    .filter(Boolean);
+}
+
 export function accountsEndpoint(): string {
   return `${DERIV_API_BASE}/trading/v1/options/accounts`;
 }

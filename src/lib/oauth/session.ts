@@ -116,6 +116,7 @@ export function publicSession(s: StoredSession): AuthSession {
     scopes: s.scopes,
     expiresAt: s.expiresAt,
     needsOptionsAccount: s.needsOptionsAccount,
+    accountsSource: s.accountsSource,
   };
 }
 

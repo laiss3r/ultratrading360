@@ -61,7 +61,7 @@ export default function ConnectPage() {
         <Card
           title="One step left: create your Options trading account"
           subtitle="Your Deriv sign-in succeeded, but the new Deriv platform keeps Options trading accounts separate from classic Deriv loginids — your profile has none yet."
-          right={<Badge tone="warn">ACTION NEEDED</Badge>}
+          right={<Badge tone="warn">NEXT STEP</Badge>}
         >
           <div className="space-y-3">
             <p className="text-xs leading-relaxed text-general">

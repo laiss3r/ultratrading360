@@ -95,6 +95,8 @@ export interface AuthorizeAccountEntry {
 
 export interface AuthorizeResult {
   account_list?: AuthorizeAccountEntry[];
+  account_loginid?: string;
+  scope?: string;
   balance?: number;
   currency?: string;
   loginid?: string;
@@ -148,4 +150,6 @@ export interface AuthSession {
    * accounts are never created automatically.
    */
   needsOptionsAccount?: boolean;
+  /** Which Deriv path produced the account rows: new REST listing or legacy socket authorize. */
+  accountsSource?: 'options_rest' | 'classic_ws';
 }

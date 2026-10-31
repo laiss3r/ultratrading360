@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildNoAccountsSession, DerivAuthError, validateAccountsForToken } from './auth';
+import { authorizeViaSocket, classicWsUrl } from './wsAuthorize';
 
 /**
  * Regression cover for the round-6 fix: an authenticated token whose profile has no
@@ -18,8 +19,15 @@ function stubAccountsJson(payload: unknown) {
   return fetchMock;
 }
 
+beforeEach(() => {
+  // Keep discovery deterministic: the legacy socket failover list points at an
+  // unreachable host so tests never touch the real network.
+  process.env.DERIV_LEGACY_WS_HOSTS = '127.0.0.1:9';
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
+  delete process.env.DERIV_LEGACY_WS_HOSTS;
 });
 
 describe('validateAccountsForToken', () => {
@@ -56,6 +64,21 @@ describe('validateAccountsForToken', () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 401, json: async () => null })));
     const err = await validateAccountsForToken('a-valid-looking-token', 'oauth').catch((e) => e);
     expect((err as DerivAuthError).code).toBe('invalid_token');
+  });
+});
+
+describe('classic socket authorize fallback', () => {
+  it('builds the legacy v3 URL with app id, language and brand', () => {
+    expect(classicWsUrl('ws.derivws.com', '34P4UiyGfp4cBEekMAF9S')).toBe(
+      'wss://ws.derivws.com/websockets/v3?app_id=34P4UiyGfp4cBEekMAF9S&l=EN&brand=deriv',
+    );
+  });
+
+  it('degrades to null when every legacy host is unreachable, fast', async () => {
+    const started = Date.now();
+    const res = await authorizeViaSocket('sometoken', '1089', 1500, ['127.0.0.1:9']);
+    expect(res).toBeNull();
+    expect(Date.now() - started).toBeLessThan(1500);
   });
 });
 
