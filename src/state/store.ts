@@ -67,6 +67,8 @@ interface State {
   provider: MarketProvider | null;
   connectionStatus: string;
   tradingLoginid: string | null;
+  tradingMessage: string | null;
+  tradingConnecting: boolean;
   symbols: ActiveSymbol[];
   activeSymbol: string;
   quotes: Quote[];
@@ -136,6 +138,7 @@ function entropy(digits: number[]): number {
 }
 
 const PREF_LOGINID = 'ut_pref_loginid';
+let modeRevision = 0;
 let upkeepStarted = false;
 let stopBalances: (() => void) | null = null;
 const lastBalances = new Map<string, BalanceUpdate>();
@@ -160,6 +163,8 @@ export const useApp = create<State & Actions>()((set, get) => ({
   provider: null,
   connectionStatus: 'idle',
   tradingLoginid: null,
+  tradingMessage: null,
+  tradingConnecting: false,
   symbols: [],
   activeSymbol: 'R_100',
   quotes: [],
@@ -563,13 +568,14 @@ export const useApp = create<State & Actions>()((set, get) => ({
   /* ---------------------------------------------------------- market data */
 
   async applyMode(mode: AccountMode, initial = false): Promise<void> {
+    const revision = ++modeRevision;
     const cur = get();
     if(cur.settings.mode!==mode)await get().setSettings({mode});
     // Tear down any running bot and the old provider before switching provenance.
     cur.stopBot(`mode changed to ${mode}`);
     cur.provider?.disconnect();
 
-    set({ dataSource: 'deriv_live', connectionStatus: 'connecting', tradingLoginid: null, marketError: null });
+    set({ dataSource: 'deriv_live', connectionStatus: 'connecting', tradingLoginid: null, tradingMessage: null, tradingConnecting: false, marketError: null });
 
     // Public market data works with NO credential, so load that first: the charts are useful
     // even before the user connects an account.
@@ -577,10 +583,12 @@ export const useApp = create<State & Actions>()((set, get) => ({
     set({ provider: publicProvider });
     try {
       await publicProvider.connect();
+      if(revision!==modeRevision){publicProvider.disconnect();return;}
       set({ connectionStatus: 'open' });
       await get().loadMarket(initial);
       get().pushLog('ok', `Connected to Deriv public market data (${mode}).`);
     } catch (e) {
+      if(revision!==modeRevision)return;
       // No fallback: a Deriv tool without Deriv shows an error, not invented prices.
       set({ connectionStatus: 'error', marketError: (e as Error).message });
       get().pushLog('error', `Deriv market-data connection failed: ${(e as Error).message}`);
@@ -592,13 +600,19 @@ export const useApp = create<State & Actions>()((set, get) => ({
       get().pushLog('warn', 'Market data is live, but no account is connected. Trading is disabled until you connect.');
       return;
     }
+    if(revision!==modeRevision)return;
     await get().attachTradingSocket(mode);
   },
 
   /** Exchange the server-held token for an OTP socket so the bot can trade. */
   async attachTradingSocket(mode: 'deriv_demo' | 'deriv_real'): Promise<void> {
     const loginid = get().session?.loginid;
-    if (!loginid) return;
+    if (!loginid || get().tradingConnecting) return;
+    if(get().bot?.hasPendingOrder()||['starting','running','paused','stopping'].includes(get().botState))return;
+    const revision = modeRevision;
+    const current = () => revision===modeRevision&&get().session?.loginid===loginid;
+    if(mode!==(get().session!.isVirtual?'deriv_demo':'deriv_real'))return;
+    set({tradingConnecting:true,tradingMessage:'Connecting the selected account and verifying its broker balance…'});
     try {
       const r = await fetch('/api/deriv/socket', {
         method: 'POST',
@@ -606,7 +620,9 @@ export const useApp = create<State & Actions>()((set, get) => ({
         body: JSON.stringify({ loginid, allowReal: mode === 'deriv_real' && get().settings.realTradingAcknowledged && get().settings.acknowledgedAccountLoginid === loginid }),
       });
       const j = await r.json();
+      if(!current())return;
       if (!r.ok || !j.ok) {
+        set({tradingMessage:j.message??`Trading channel failed (HTTP ${r.status}).`,tradingLoginid:null});
         get().pushLog('warn', `Trading socket unavailable: ${j.message ?? r.status}. Market data still works; trading stays disabled.`);
         return;
       }
@@ -634,14 +650,14 @@ export const useApp = create<State & Actions>()((set, get) => ({
       set({ connectionStatus: 'open' });
       await authed.streamBalance((balance, currency) => {
         if (get().session?.loginid !== loginid || get().provider !== authed) return;
-        set({ tradingLoginid: loginid, session: { ...get().session!, balance, currency },
+        set({ tradingLoginid: loginid, tradingMessage:null, session: { ...get().session!, balance, currency },
           accounts: get().accounts.map((a) => a.loginid === loginid ? { ...a, balance, currency } : a) });
       });
       await get().subscribeTicks(get().activeSymbol);
       get().pushLog('ok', `Authenticated trading socket open for ${loginid} (${j.mode}).`);
     } catch (e) {
-      get().pushLog('error', `Trading socket error: ${(e as Error).message}`);
-    }
+      if(current()){set({tradingMessage:(e as Error).message,tradingLoginid:null});get().pushLog('error', `Trading socket error: ${(e as Error).message}`);}
+    }finally{if(current())set({tradingConnecting:false});}
   },
 
   async loadMarket(initial = false): Promise<void> {
@@ -658,7 +674,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
       });
       if (!initial) get().pushLog('info', `Loaded ${hist.length} historical ticks for ${activeSymbol}.`);
       await get().subscribeTicks(activeSymbol);
-      if (provider instanceof DerivProvider) await get().loadSymbols();
+      if (provider instanceof DerivProvider) void get().loadSymbols();
     } catch (e) {
       set({ marketLoading: false, marketError: (e as Error).message });
       get().pushLog('error', `Market load failed: ${(e as Error).message}`);
@@ -672,7 +688,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
       const symbols = await provider.activeSymbols('synthetic_index');
       set({ symbols });
       get().pushLog('info', `Discovered ${symbols.length} synthetic markets from Deriv.`);
-      await get().rankMarkets(symbols);
+      void get().rankMarkets(symbols);
     } catch (e) {
       get().pushLog('warn', `Symbol discovery failed: ${(e as Error).message}`);
     }
@@ -699,6 +715,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
     // Sample a bounded subset so ranking never hammers the API.
     const sample = list.filter((s) => s.exchange_is_open === 1).slice(0, 14);
     for (const s of sample) {
+      if(get().provider!==provider)break;
       try {
         const hist = await provider.history(s.underlying_symbol, 300);
         const digits = hist.map((q) => q.digit);
@@ -818,7 +835,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
     if (provider.mode !== (get().session!.isVirtual ? 'deriv_demo' : 'deriv_real') || mode !== provider.mode) return { ok: false, message: 'The account environment and trading provider do not match. Reconnect before running.' };
     if (s.currency !== get().session!.currency) return { ok: false, message: 'Strategy currency does not match the selected account. Review the setup.' };
     if (get().tradingLoginid !== get().session?.loginid) {
-      return { ok: false, message: 'No verified trading connection for the selected account. Reconnect, and acknowledge Real trading in Risk settings if applicable.' };
+      return { ok: false, message: `No verified trading connection for the selected account. ${get().tradingMessage??'Reconnect, and acknowledge Real trading in Risk settings if applicable.'}` };
     }
     if (!get().settings.limits.tradingEnabled) {
       return { ok: false, message: 'Trading is disabled. Enable it in Risk settings — the bot refuses to run otherwise.' };

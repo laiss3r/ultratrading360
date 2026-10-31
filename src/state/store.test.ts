@@ -6,7 +6,7 @@ import { useApp } from './store';
 import { DEFAULT_SETTINGS } from '@/lib/persistence/db';
 import { createStrategy } from '@/lib/engine/strategies';
 import type { AuthSession } from '@/lib/deriv/types';
-import type { MarketProvider } from '@/lib/engine/provider';
+import { DerivProvider, type MarketProvider } from '@/lib/engine/provider';
 const baseline=useApp.getState();
 const real:AuthSession={kind:'pat',loginid:'ROT1',currency:'USD',balance:0,isVirtual:false,scopes:['trade'],expiresAt:null};
 beforeEach(()=>{vi.clearAllMocks();useApp.setState({...baseline,settings:{...DEFAULT_SETTINGS,limits:{...DEFAULT_SETTINGS.limits}},log:[]},true);});
@@ -74,4 +74,35 @@ describe('session reset and account mode integrity',()=>{
  it('resets only the session display, never the historical ledger or journal',async()=>{
   const trade={id:'test'} as import('@/lib/engine/bot').TradeRecord;useApp.setState({trades:[trade],bot:null,botState:'halted',executionJournal:[]});expect((await useApp.getState().resetSessionView()).ok).toBe(true);expect(useApp.getState().trades).toEqual([trade]);expect(useApp.getState().botState).toBe('idle');
  });
+});
+
+describe('visible account-channel diagnostics and safe reconnect',()=>{
+ it('shows the broker socket refusal instead of silently remaining Not connected',async()=>{
+  const demo={...real,loginid:'DOT1',isVirtual:true};
+  useApp.setState({session:demo,bot:null,botState:'idle',tradingConnecting:false});
+  vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify({ok:false,message:'Deriv OTP service temporarily unavailable.'}),{status:502})));
+  await useApp.getState().attachTradingSocket('deriv_demo');
+  expect(useApp.getState().tradingMessage).toBe('Deriv OTP service temporarily unavailable.');expect(useApp.getState().tradingConnecting).toBe(false);expect(useApp.getState().tradingLoginid).toBeNull();
+ });
+ it('cannot replace a pending accepted contract with a reconnect',async()=>{
+  const disconnect=vi.fn(),fetch=vi.fn();vi.stubGlobal('fetch',fetch);
+  useApp.setState({session:real,bot:{hasPendingOrder:()=>true} as never,provider:{disconnect} as unknown as MarketProvider,tradingConnecting:false});
+  await useApp.getState().attachTradingSocket('deriv_real');expect(fetch).not.toHaveBeenCalled();expect(disconnect).not.toHaveBeenCalled();
+ });
+ it('ignores a late socket response belonging to a previous account',async()=>{
+  let release!:(r:Response)=>void;vi.stubGlobal('fetch',vi.fn(()=>new Promise<Response>((resolve)=>{release=resolve;})));
+  useApp.setState({session:real,bot:null,botState:'idle',tradingConnecting:false});
+  const pending=useApp.getState().attachTradingSocket('deriv_real');
+  useApp.setState({session:{...real,loginid:'ROT_NEW'},tradingConnecting:false,tradingMessage:'New account connection'});
+  release(new Response(JSON.stringify({ok:false,message:'Old account error'}),{status:502}));await pending;
+  expect(useApp.getState().tradingMessage).toBe('New account connection');
+ });
+});
+
+it('does not delay account initialization behind market ranking',async()=>{
+ const provider=new DerivProvider('deriv_demo');
+ vi.spyOn(provider,'activeSymbols').mockResolvedValue([]);
+ const rankMarkets=vi.fn(()=>new Promise<void>(()=>{}));
+ useApp.setState({provider,rankMarkets});
+ await useApp.getState().loadSymbols();expect(rankMarkets).toHaveBeenCalledOnce();
 });
