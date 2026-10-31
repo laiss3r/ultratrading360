@@ -48,7 +48,17 @@ export async function GET(req: Request) {
   }
 
   try {
-    const { accounts } = await validateAccountsForToken(session.accessToken, session.kind);
+    let accounts;
+    try {
+      ({ accounts } = await validateAccountsForToken(session.accessToken, session.kind));
+    } catch (e) {
+      // A session flagged as waiting for an Options account stays authenticated:
+      // the empty listing is exactly the state it was created in.
+      if (session.needsOptionsAccount && (e as { code?: string }).code === 'no_accounts') {
+        return NextResponse.json({ authenticated: true, session: publicSession(session), accounts: [] });
+      }
+      throw e;
+    }
     const current = accounts.find((a) => a.account_loginid === session.loginid) ?? accounts[0];
     const updated: StoredSession = {
       ...session,

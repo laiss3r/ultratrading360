@@ -140,4 +140,12 @@ export interface AuthSession {
   isVirtual: boolean;
   scopes: string[];
   expiresAt: number | null;
+  /**
+   * True when the credential authenticated but the Deriv profile holds no
+   * Options trading account on the new platform yet (classic CR/VRTC loginids
+   * are not Options accounts and never appear in the new REST listing). The
+   * UI then offers a one-click demo Options account creation; real Options
+   * accounts are never created automatically.
+   */
+  needsOptionsAccount?: boolean;
 }

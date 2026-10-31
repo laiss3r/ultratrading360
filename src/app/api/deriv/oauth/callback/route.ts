@@ -100,13 +100,24 @@ export async function POST(req: Request) {
   const primary = accounts.find((a) => a.is_virtual !== 1) ?? accounts[0];
   const expiresAt = token.expiresIn > 0 ? Date.now() + token.expiresIn * 1000 : null;
   const session = {
-    ...buildSession('oauth', primary, scopes, expiresAt),
+    ...buildSession(
+      'oauth',
+      primary ?? { account_loginid: '', currency: 'USD', balance: 0, is_virtual: 1 },
+      scopes,
+      expiresAt,
+    ),
+    // A valid token with zero Options accounts is still a connection: the new
+    // platform keeps Options accounts separate from classic Deriv loginids, so
+    // many profiles legitimately have none until one is created. The UI offers
+    // the demo creation explicitly; nothing is created behind anyone's back.
+    needsOptionsAccount: accounts.length === 0 ? true : undefined,
     accessToken: token.accessToken,
   };
 
   const res = NextResponse.json({
     ok: true,
     session: publicSession(session),
+    needsOptionsAccount: accounts.length === 0,
     accounts: accounts.map((a) => ({
       loginid: a.account_loginid,
       currency: a.currency,

@@ -69,7 +69,9 @@ function CallbackInner() {
         }
         setExchange({
           status: 'ok',
-          message: `Signed in as ${j.session?.loginid ?? 'your Deriv account'}.`,
+          message: j.needsOptionsAccount
+            ? 'Signed in. Your Deriv profile has no Options trading account on the new platform yet — create the free demo one on the Connect page to finish.'
+            : `Signed in as ${j.session?.loginid ?? 'your Deriv account'}.`,
           detail: null,
         });
         s.pushLog('ok', 'OAuth sign-in completed. Token stored server-side in an encrypted httpOnly cookie.');

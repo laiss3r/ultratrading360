@@ -254,6 +254,30 @@ export const useApp = create<State & Actions>()((set, get) => ({
     }
   },
 
+  async createOptionsAccount(accountType: 'demo' | 'real'): Promise<{ ok: boolean; message: string }> {
+    set({ busy: 'create-options' });
+    try {
+      const r = await fetch('/api/deriv/accounts/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountType }),
+      });
+      const j = await r.json();
+      if (!r.ok || !j.ok) {
+        const msg = j.message ?? `Deriv refused the request (HTTP ${r.status}).`;
+        get().pushLog('error', `Options account creation failed: ${msg}`);
+        return { ok: false, message: msg };
+      }
+      set({ session: j.session as AuthSession, accounts: (j.accounts ?? []) as AccountSummary[] });
+      get().pushLog('ok', `Options account created: ${j.session.loginid} (${accountType}).`);
+      get().rebaseToAccount();
+      if (accountType === 'demo') await get().applyMode('deriv_demo', false);
+      return { ok: true, message: `Connected as ${j.session.loginid}` };
+    } finally {
+      set({ busy: null });
+    }
+  },
+
   async connectWithPat(token: string): Promise<{ ok: boolean; message: string }> {
     set({ busy: 'pat' });
     try {
@@ -668,6 +692,7 @@ interface Actions {
   setSettings: (patch: Partial<AppSettings>) => Promise<void>;
   refreshSession: (notify?: boolean) => Promise<void>;
   connectWithPat: (token: string) => Promise<{ ok: boolean; message: string }>;
+  createOptionsAccount: (accountType: 'demo' | 'real') => Promise<{ ok: boolean; message: string }>;
   startOAuth: (signup?: boolean) => Promise<{ ok: boolean; message: string }>;
   disconnect: () => Promise<void>;
   selectAccount: (loginid: string) => Promise<{ ok: boolean; message: string }>;

@@ -25,7 +25,15 @@ export async function GET() {
   }
 
   try {
-    const { accounts } = await validateAccountsForToken(session.accessToken, session.kind);
+    let accounts;
+    try {
+      ({ accounts } = await validateAccountsForToken(session.accessToken, session.kind));
+    } catch (e) {
+      if ((e as { code?: string }).code === 'no_accounts') {
+        return NextResponse.json({ ok: true, accounts: [] });
+      }
+      throw e;
+    }
     return NextResponse.json({
       ok: true,
       accounts: accounts.map((a) => ({

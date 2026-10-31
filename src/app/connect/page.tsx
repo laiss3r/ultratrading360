@@ -57,6 +57,48 @@ export default function ConnectPage() {
 
   return (
     <div className="mx-auto max-w-[1100px] space-y-3 p-4">
+      {s.session?.needsOptionsAccount && (
+        <Card
+          title="One step left: create your Options trading account"
+          subtitle="Your Deriv sign-in succeeded, but the new Deriv platform keeps Options trading accounts separate from classic Deriv loginids — your profile has none yet."
+          right={<Badge tone="warn">ACTION NEEDED</Badge>}
+        >
+          <div className="space-y-3">
+            <p className="text-xs leading-relaxed text-general">
+              Creating a <strong>demo</strong> Options account is free, instant and reversible, and it is what this app
+              trades on in demo mode. A <strong>real</strong> Options account is never created automatically; requesting
+              one here sends Deriv your explicit request and Deriv&apos;s own funding rules then apply.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="primary"
+                disabled={s.busy === 'create-options'}
+                onClick={() =>
+                  void s.createOptionsAccount('demo').then((r) => setResult({ ok: r.ok, message: r.message }))
+                }
+              >
+                Create free demo Options account
+              </Button>
+              <Button
+                variant="outline"
+                disabled={s.busy === 'create-options'}
+                onClick={() =>
+                  void s.createOptionsAccount('real').then((r) => setResult({ ok: r.ok, message: r.message }))
+                }
+                title="Sends an explicit real-account request to Deriv; Deriv requires a funded wallet"
+              >
+                Request real Options account
+              </Button>
+            </div>
+            {result && (
+              <Banner tone={result.ok ? 'success' : 'warn'}>
+                {result.message}
+              </Banner>
+            )}
+          </div>
+        </Card>
+      )}
+
       <Banner tone="info">
         <strong className="font-bold">Market data needs no credentials.</strong> Tick streams, digit extraction, proposals and
         statistics already work without connecting anything. You only need to connect to place demo or real orders.

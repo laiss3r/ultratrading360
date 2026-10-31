@@ -115,6 +115,7 @@ export function publicSession(s: StoredSession): AuthSession {
     isVirtual: s.isVirtual,
     scopes: s.scopes,
     expiresAt: s.expiresAt,
+    needsOptionsAccount: s.needsOptionsAccount,
   };
 }
 
