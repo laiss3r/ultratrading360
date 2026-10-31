@@ -151,5 +151,5 @@ export interface AuthSession {
    */
   needsOptionsAccount?: boolean;
   /** Which Deriv path produced the account rows: new REST listing or legacy socket authorize. */
-  accountsSource?: 'options_rest' | 'classic_ws';
+  accountsSource?: 'options_rest' | 'classic_ws' | 'classic_browser';
 }

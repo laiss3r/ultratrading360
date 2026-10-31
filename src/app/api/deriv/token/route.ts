@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { buildNoAccountsSession, buildSession, DerivAuthError, validatePat } from '@/lib/deriv/auth';
-import { encryptSession, publicSession, SESSION_COOKIE, sessionExpirySeconds } from '@/lib/oauth/session';
+import { buildNoAccountsSession, buildSession, DerivAuthError, ensureOptionsAccount, validatePat } from '@/lib/deriv/auth';
+import { encryptSession, HANDOFF_COOKIE, publicSession, SESSION_COOKIE, sessionExpirySeconds, signValue } from '@/lib/oauth/session';
 import type { AccountInfo } from '@/lib/deriv/types';
 
 export const dynamic = 'force-dynamic';
@@ -34,13 +34,18 @@ export async function POST(req: Request) {
     let accounts: AccountInfo[] = [];
     let scopes: string[] = [];
     let noAccounts = false;
-    let source: 'options_rest' | 'classic_ws' = 'options_rest';
+    let source: 'options_rest' | 'classic_ws' | 'classic_browser' = 'options_rest';
     try {
       ({ accounts, scopes, source } = await validatePat(raw));
     } catch (e) {
       const err = e as DerivAuthError;
       if (err.code !== 'no_accounts') throw err;
       noAccounts = true; // authenticated PAT, profile without an Options account yet
+      const created = await ensureOptionsAccount(raw, 'pat');
+      if (created) {
+        accounts = [created];
+        noAccounts = false;
+      }
     }
     const primary = accounts.find((a) => a.is_virtual !== 1) ?? accounts[0];
     // PATs carry no expiry we can read from the API; cap the local session at 8 hours so a
@@ -69,6 +74,15 @@ export async function POST(req: Request) {
       path: '/',
       maxAge: sessionExpirySeconds(session),
     });
+    if (noAccounts) {
+      res.cookies.set(HANDOFF_COOKIE, signValue('1'), {
+        httpOnly: true,
+        secure: true,
+        sameSite: 'lax',
+        path: '/',
+        maxAge: 120,
+      });
+    }
     return res;
   } catch (e) {
     if (e instanceof DerivAuthError) {

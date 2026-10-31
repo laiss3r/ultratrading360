@@ -24,6 +24,8 @@ import type { AuthSession } from '../deriv/types';
  */
 
 export const SESSION_COOKIE = 'ut_session';
+/** Single-use, 120s marker that permits exactly one browser-side token handoff. */
+export const HANDOFF_COOKIE = 'ut_handoff';
 export const STATE_COOKIE = 'ut_oauth_state';
 export const VERIFIER_COOKIE = 'ut_oauth_verifier';
 

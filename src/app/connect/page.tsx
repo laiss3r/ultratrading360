@@ -165,8 +165,12 @@ export default function ConnectPage() {
                 <p className="text-xxs leading-relaxed text-less-prominent">
                   You are redirected to <code className="num">auth.deriv.com/oauth2/auth</code>. Deriv returns a one-time code to{' '}
                   <code className="num">{s.redirectUri || 'the callback route'}</code>; a server-side route exchanges it for a token using
-                  the PKCE verifier. The token is stored in an encrypted <code className="num">httpOnly</code> cookie and is never exposed to
-                  page JavaScript, never written to IndexedDB, and never sent to the browser.
+                  the PKCE verifier. The token is stored in an encrypted <code className="num">httpOnly</code> cookie. If your profile holds no
+                  account on Deriv&apos;s new platform, sign-in creates the free demo Options account automatically (idempotent —
+                  Deriv returns the existing one if present), and this tab may receive the token for a couple of seconds through a
+                  single-use same-origin handoff to read your classic account list from Deriv&apos;s legacy socket, exactly like every
+                  other Deriv client; it is then discarded and never written to localStorage, sessionStorage or IndexedDB. A real
+                  account is never created automatically.
                 </p>
               </>
             ) : (

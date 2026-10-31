@@ -1,14 +1,16 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { getOAuthClientId, getRedirectUri } from '@/lib/deriv/config';
-import { buildNoAccountsSession, buildSession, DerivAuthError, exchangeAuthorizationCode, validateAccountsForToken } from '@/lib/deriv/auth';
+import { buildNoAccountsSession, buildSession, DerivAuthError, ensureOptionsAccount, exchangeAuthorizationCode, validateAccountsForToken } from '@/lib/deriv/auth';
 import type { AccountInfo } from '@/lib/deriv/types';
 import { safeEqual } from '@/lib/oauth/pkce';
 import {
   encryptSession,
   publicSession,
+  HANDOFF_COOKIE,
   SESSION_COOKIE,
   sessionExpirySeconds,
+  signValue,
   STATE_COOKIE,
   VERIFIER_COOKIE,
   verifySignedValue,
@@ -90,7 +92,7 @@ export async function POST(req: Request) {
   let accounts: AccountInfo[] = [];
   let scopes: string[] = [];
   let noAccounts = false;
-  let source: 'options_rest' | 'classic_ws' = 'options_rest';
+  let source: 'options_rest' | 'classic_ws' | 'classic_browser' = 'options_rest';
   try {
     ({ accounts, scopes, source } = await validateAccountsForToken(token.accessToken, 'oauth'));
   } catch (e) {
@@ -99,8 +101,14 @@ export async function POST(req: Request) {
       return fail(err.code ?? 'account_fetch_failed', err.message, 401);
     }
     // Authenticated token, zero Options accounts: a legitimate state on the new
-    // platform, not a failed sign-in. Fall through to the flagged session below.
+    // platform, not a failed sign-in. Try the idempotent demo creation once so the
+    // sign-in can finish with a real row; otherwise fall through flagged.
     noAccounts = true;
+    const created = await ensureOptionsAccount(token.accessToken, 'oauth');
+    if (created) {
+      accounts = [created];
+      noAccounts = false;
+    }
   }
 
   // Prefer a real account for display, but never silently promote one: the UI shows every
@@ -133,6 +141,16 @@ export async function POST(req: Request) {
     path: '/',
     maxAge: sessionExpirySeconds(session),
   });
+  if (noAccounts) {
+    // Permit exactly one browser-side classic discovery run (120s, single-use).
+    res.cookies.set(HANDOFF_COOKIE, signValue('1'), {
+      httpOnly: true,
+      secure: redirectUri.startsWith('https://'),
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 120,
+    });
+  }
   clearAuthCookies(res);
   return res;
 }

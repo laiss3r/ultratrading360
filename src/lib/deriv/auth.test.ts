@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildNoAccountsSession, DerivAuthError, validateAccountsForToken } from './auth';
+import { adoptedRowsToAccounts, buildNoAccountsSession, DerivAuthError, ensureOptionsAccount, validateAccountsForToken } from './auth';
+import { sanitizeAdoptedAccounts } from './authorizeMap';
 import { authorizeViaSocket, classicWsUrl } from './wsAuthorize';
 
 /**
@@ -64,6 +65,55 @@ describe('validateAccountsForToken', () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 401, json: async () => null })));
     const err = await validateAccountsForToken('a-valid-looking-token', 'oauth').catch((e) => e);
     expect((err as DerivAuthError).code).toBe('invalid_token');
+  });
+});
+
+describe('ensureOptionsAccount (idempotent demo create)', () => {
+  it('parses a 201 created array into one row', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 201,
+      json: async () => ({ data: [{ account_id: 'DOT90004580', currency: 'USD', balance: 10000, account_type: 'demo' }] }),
+    })));
+    const row = await ensureOptionsAccount('tokentoken', 'oauth');
+    expect(row?.account_loginid).toBe('DOT90004580');
+    expect(row?.is_virtual).toBe(1);
+  });
+
+  it('parses a 200 already-exists single object', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: { account_id: 'ROT123', currency: 'USD', balance: 0, account_type: 'real' } }),
+    })));
+    const row = await ensureOptionsAccount('tokentoken', 'oauth');
+    expect(row?.account_loginid).toBe('ROT123');
+    expect(row?.is_virtual).toBe(0);
+  });
+
+  it('returns null on refusals and empty payloads instead of inventing accounts', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 403, json: async () => ({ message: 'nope' }) })));
+    expect(await ensureOptionsAccount('tokentoken', 'oauth')).toBeNull();
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) })));
+    expect(await ensureOptionsAccount('tokentoken', 'oauth')).toBeNull();
+  });
+});
+
+describe('adopted classic rows', () => {
+  it('sanitises away junk and keeps clean rows', () => {
+    const rows = sanitizeAdoptedAccounts([
+      { loginid: 'VRTC123', currency: 'usd', balance: 4172.24, isVirtual: true },
+      { loginid: 'CR456', currency: 'USD', balance: 0, isVirtual: false },
+      { loginid: '', balance: 1 },
+      { loginid: 'x'.repeat(40), balance: 1 },
+      'nope',
+      null,
+    ]);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toEqual({ loginid: 'VRTC123', currency: 'USD', balance: 4172.24, isVirtual: true });
+    const accounts = adoptedRowsToAccounts(rows);
+    expect(accounts[0].is_virtual).toBe(1);
+    expect(accounts[1].is_virtual).toBe(0);
   });
 });
 

@@ -1,6 +1,6 @@
 import WebSocket from 'ws';
 import { DERIV_APP_ID, legacyWsHosts } from './config';
-import type { AccountInfo, AuthorizeResult } from './types';
+import type { AuthorizeResult } from './types';
 
 /**
  * The classic Deriv authentication call: `{ authorize: token }` on a legacy
@@ -130,37 +130,4 @@ export async function authorizeViaSocket(
   return null;
 }
 
-/** Pure mapping from an authorize payload to the account rows the session and
- *  the switcher use. `account_list` carries every account the token can see;
- *  narrowly-scoped tokens may echo only the authorized loginid, which still
- *  becomes one real row instead of "no accounts". */
-export function accountsFromAuthorizePayload(a: AuthorizeResult | null): AccountInfo[] {
-  if (!a) return [];
-  const list = Array.isArray(a.account_list) ? a.account_list : [];
-  if (list.length > 0) {
-    return list.map((row) => ({
-      account_loginid: (row.loginid ?? row.account_loginid ?? '') as string,
-      currency: (row.currency ?? 'USD') as string,
-      balance: Number(row.balance ?? 0),
-      is_virtual: row.is_virtual === 1 || /^VRT|CRSD|VRD/.test(String(row.loginid ?? row.account_loginid ?? '')) ? 1 : 0,
-    }));
-  }
-  const loginid = (a.account_loginid ?? a.loginid ?? '') as string;
-  if (!loginid) return [];
-  return [
-    {
-      account_loginid: loginid,
-      loginid,
-      currency: (a.currency ?? 'USD') as string,
-      balance: Number(a.balance ?? 0),
-      is_virtual: a.is_virtual === 1 || /^VRT|CRSD|VRD/.test(loginid) ? 1 : 0,
-    },
-  ];
-}
-
-export function scopesFromAuthorizePayload(a: AuthorizeResult | null): string[] | null {
-  const raw = a?.scope ?? a?.scopes;
-  if (typeof raw === 'string' && raw.trim()) return raw.trim().split(/\s+/);
-  if (Array.isArray(raw) && raw.length > 0) return raw.map(String);
-  return null;
-}
+export { accountsFromAuthorizePayload, scopesFromAuthorizePayload } from './authorizeMap';

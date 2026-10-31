@@ -1,4 +1,5 @@
 import { DERIV_APP_ID, accountsEndpoint, otpEndpoint } from './config';
+import type { AdoptedRow } from './authorizeMap';
 
 import type { AccountInfo, AuthSession } from './types';
 import { accountsFromAuthorizePayload, authorizeViaSocket, scopesFromAuthorizePayload } from './wsAuthorize';
@@ -98,7 +99,7 @@ export async function validateAccountsForToken(
   // the ones every Deriv client's switcher shows — come from the legacy socket
   // authorize call. Try it (hardened handshake + host failover) before anyone is
   // told they have no accounts.
-  let source: 'options_rest' | 'classic_ws' = 'options_rest';
+  let source: 'options_rest' | 'classic_ws' | 'classic_browser' = 'options_rest';
   let scopes: string[] | null = null;
   if (!Array.isArray(accounts) || accounts.length === 0) {
     const authorize = await authorizeViaSocket(trimmed);
@@ -124,6 +125,54 @@ export async function validateAccountsForToken(
     scopes: scopes ?? (kind === 'pat' ? [...MINIMUM_READ_SCOPES] : ['trade', 'account_manage', 'application_read']),
     source,
   };
+}
+
+/**
+ * Idempotent demo Options account creation (Deriv answers 201 with the new account,
+ * or 200 with the existing one when the same parameters already exist). Used to
+ * remove the manual "create" step on sign-in for profiles that have no account on
+ * the new platform yet. Real accounts are NEVER created here.
+ */
+export async function ensureOptionsAccount(
+  token: string,
+  kind: 'pat' | 'oauth',
+  currency = 'USD',
+): Promise<AccountInfo | null> {
+  try {
+    const res = await fetch(accountsEndpoint(), {
+      method: 'POST',
+      headers: authHeaders(token.trim(), kind),
+      cache: 'no-store',
+      body: JSON.stringify({ currency, group: 'row', account_type: 'demo' }),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json().catch(() => null)) as {
+      data?:
+        | { account_id?: string; currency?: string; balance?: number; account_type?: string }
+        | Array<{ account_id?: string; currency?: string; balance?: number; account_type?: string }>;
+    } | null;
+    const raw = Array.isArray(body?.data) ? body?.data[0] : body?.data;
+    if (!raw?.account_id) return null;
+    return {
+      account_loginid: raw.account_id,
+      currency: (raw.currency ?? currency).toUpperCase(),
+      balance: Number(raw.balance ?? 0),
+      is_virtual: raw.account_type === 'demo' ? 1 : 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Rows adopted from the browser-side classic discovery run. */
+export function adoptedRowsToAccounts(rows: AdoptedRow[]): AccountInfo[] {
+  return rows.map((r) => ({
+    account_loginid: r.loginid,
+    loginid: r.loginid,
+    currency: r.currency,
+    balance: r.balance,
+    is_virtual: r.isVirtual ? 1 : 0,
+  }));
 }
 
 /**

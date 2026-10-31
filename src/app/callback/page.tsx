@@ -5,6 +5,7 @@ import { Suspense, useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Loader2, XCircle } from 'lucide-react';
 import { Banner, Button, Card } from '@/components/ui';
 import { useApp } from '@/state/store';
+import { discoverClassicAccounts } from '@/lib/deriv/browserLegacyWs';
 
 /**
  * OAuth landing page.
@@ -12,7 +13,12 @@ import { useApp } from '@/state/store';
  * Deriv redirects the browser here with ?code=...&state=... . The actual token exchange happens
  * in the server route (POST /api/deriv/oauth/callback), which validates `state` against a signed
  * httpOnly cookie and swaps the code using the PKCE verifier. This component only forwards the
- * parameters and reports the outcome — it never sees the access token.
+ * parameters and reports the outcome.
+ *
+ * For profiles that hold no account on Deriv's new platform, this page also performs
+ * ONE classic discovery run (the authorize call every Deriv client makes) using a
+ * single-use, 120-second same-origin handoff: the token exists only inside this
+ * effect's scope for a couple of seconds and is never written to any storage.
  */
 function CallbackInner() {
   const router = useRouter();
@@ -67,16 +73,54 @@ function CallbackInner() {
           s.pushLog('error', `OAuth callback failed: ${j.message ?? r.status}`);
           return;
         }
+        let landed = (j.accounts ?? []) as Array<{ loginid: string; currency: string; balance: number; isVirtual: boolean }>;
+        if (landed.length === 0) {
+          setExchange({ status: 'ok', message: 'Reading your classic Deriv accounts…', detail: null });
+          try {
+            const h = await fetch('/api/deriv/handoff', { method: 'POST', credentials: 'same-origin' });
+            const hj = h.ok ? ((await h.json()) as { ok?: boolean; token?: string; hosts?: string[] }) : null;
+            if (hj?.ok && hj.token) {
+              const disc = await discoverClassicAccounts(hj.token, hj.hosts ?? []);
+              // The handed-off token lives only in this scope; dropping the last
+              // reference here is all the cleanup a JS string needs.
+              if (disc && disc.accounts.length > 0) {
+                const ad = await fetch('/api/deriv/accounts/adopt', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  credentials: 'same-origin',
+                  body: JSON.stringify({
+                    accounts: disc.accounts.map((a) => ({
+                      loginid: a.account_loginid,
+                      currency: a.currency,
+                      balance: a.balance ?? 0,
+                      isVirtual: a.is_virtual === 1,
+                    })),
+                    scopes: disc.scopes,
+                  }),
+                });
+                if (ad.ok) {
+                  const aj = (await ad.json()) as { accounts?: typeof landed };
+                  landed = aj.accounts ?? landed;
+                }
+              }
+            }
+          } catch {
+            /* discovery is best-effort; the Connect page covers the remainder */
+          }
+        }
         setExchange({
           status: 'ok',
-          message: j.needsOptionsAccount
-            ? 'Signed in. Your Deriv profile has no Options trading account on the new platform yet — create the free demo one on the Connect page to finish.'
-            : `Signed in as ${j.session?.loginid ?? 'your Deriv account'}.`,
+          message:
+            landed.length > 0
+              ? `Signed in as ${landed[0].loginid}.`
+              : j.needsOptionsAccount
+                ? 'Signed in. Your Deriv profile has no Options trading account on the new platform yet — create the free demo one on the Connect page to finish.'
+                : `Signed in as ${j.session?.loginid ?? 'your Deriv account'}.`,
           detail: null,
         });
         s.pushLog('ok', 'OAuth sign-in completed. Token stored server-side in an encrypted httpOnly cookie.');
         await s.refreshSession(false);
-        setTimeout(() => router.replace('/connect'), 1400);
+        setTimeout(() => router.replace(landed.length > 0 ? '/' : '/connect'), 1400);
       } catch (e) {
         setExchange({
           status: 'error',
