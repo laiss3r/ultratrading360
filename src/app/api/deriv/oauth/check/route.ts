@@ -35,12 +35,17 @@ export async function GET() {
     const res = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(9000) });
     const location = res.headers.get('location') ?? '';
     const verdict = interpretProbeRedirect(location, redirectUri);
-    return NextResponse.json({ registered: verdict.registered, detail: verdict.detail, location, redirectUri });
+    return NextResponse.json({
+      registered: verdict.registered,
+      detail: verdict.detail,
+      location,
+      redirectUri,
+      legacyWs: await pingLegacyWs(),
+    });
   } catch (e) {
     return NextResponse.json({
       registered: null,
       detail: `Probe could not reach Deriv (${e instanceof Error ? e.message : 'unknown error'}).`,
-    legacyWs: await pingLegacyWs(),
       redirectUri,
     });
   }
