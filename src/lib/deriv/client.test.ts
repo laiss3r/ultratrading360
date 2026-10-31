@@ -67,3 +67,31 @@ it('does not replay a completed contract after its named subscription is forgott
   const forgotten=c.forget('settled-contract','poc_123');const forget=Socket.instances[0].sent.at(-1)!;Socket.instances[0].message({req_id:forget.req_id,forget:1});await forgotten;
   Socket.instances[0].close();await vi.advanceTimersByTimeAsync(800);Socket.instances[1].open();expect(Socket.instances[1].sent.some((r)=>r.proposal_open_contract)).toBe(false);c.close();
 });
+
+it('forgets the current subscription ID after reconnect and removes replay aliases', async () => {
+  const c = new DerivClient({ url: 'wss://example.test' });
+  const connection = c.connect(); Socket.instances[0].open(); await connection;
+  const handler = vi.fn();
+  const subscription = c.subscribe({ ticks: 'R_10' }, handler, 'bot_ticks');
+  const initial = Socket.instances[0].sent.at(-1)!;
+  Socket.instances[0].message({ req_id: initial.req_id, subscription: { id: 'original-id' }, tick: { quote: 10 } });
+  await subscription;
+  Socket.instances[0].close(); await vi.advanceTimersByTimeAsync(800);
+  const current = Socket.instances[1]; current.open();
+  const replay = current.sent.at(-1)!;
+  current.message({ req_id: replay.req_id, subscription: { id: 'current-id' }, tick: { quote: 11 } });
+  expect(handler).toHaveBeenCalledTimes(1);
+  const forgotten = c.forget('original-id', 'bot_ticks');
+  let request = current.sent.at(-1)!;
+  expect(request.forget).toBe('original-id');
+  current.message({ req_id: request.req_id, forget: 1 });
+  await Promise.resolve(); await Promise.resolve();
+  request = current.sent.at(-1)!;
+  expect(request.forget).toBe('current-id');
+  current.message({ req_id: request.req_id, forget: 1 }); await forgotten;
+  current.message({ req_id: replay.req_id, subscription: { id: 'current-id' }, tick: { quote: 12 } });
+  expect(handler).toHaveBeenCalledTimes(1);
+  current.close(); await vi.advanceTimersByTimeAsync(800); Socket.instances[2].open();
+  expect(Socket.instances[2].sent.some((request) => request.ticks)).toBe(false);
+  c.close();
+});

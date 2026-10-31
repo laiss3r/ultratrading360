@@ -1,0 +1,53 @@
+'use client';
+import {useEffect,useState} from 'react';
+import {useApp} from '@/state/store';
+import type {TradeRecord} from '@/lib/engine/bot';
+import {computeMetrics} from '@/lib/metrics';
+import {Button,Empty,Metric,Notice} from './ui';
+const number=(n:number|undefined)=>n===undefined||!Number.isFinite(n)?'—':String(n);
+const cash=(n:number|undefined)=>n===undefined||!Number.isFinite(n)?'—':n.toFixed(2);
+const signed=(n:number)=>`${n>=0?'+':''}${n.toFixed(2)}`;
+
+export function BrokerTransactions({records}:{records:TradeRecord[]}){
+ if(!records.length)return <Empty title="No settled transactions">Only broker-confirmed results and explicitly labelled execution errors appear here.</Empty>;
+ return <div className="table-scroll"><table><thead><tr><th>Time / contract</th><th>Entry / exit spot</th><th>Buy price / net P/L</th><th>Result / detail</th></tr></thead><tbody>{records.map((t)=><tr key={t.id}><td><strong>{t.symbol} · {t.contractType}{t.barrier!==undefined?` ${t.barrier}`:''}</strong><small>{new Date(t.closedAt).toLocaleTimeString()} · {t.duration??'—'} {t.durationUnit??''}</small><small>{t.accountLoginid??'Legacy record: account not attributed'} · {t.mode==='deriv_real'?'REAL':'DEMO'}</small></td><td>{number(t.entryPrice)}<small>{number(t.exitPrice)}</small></td><td>{cash(t.stake)} {t.currency??''}<small className={t.profit>=0?'positive':'negative'}>{t.error?'Not settled':signed(t.profit)}</small></td><td><span className={`badge ${t.error?'badge-neutral':t.profit>0?'badge-green':t.profit<0?'badge-red':'badge-neutral'}`}>{t.error?'Error':t.profit>0?'Won':t.profit<0?'Lost':'Zero net'}</span><details style={{whiteSpace:'normal',minWidth:140,maxWidth:270}}><summary className="micro">View detail</summary><dl className="detail-list"><div><dt>Broker contract</dt><dd>{t.contractId??'Not recorded'}</dd></div><div><dt>Gross return</dt><dd>{cash(t.payout)} {t.currency??''}</dd></div><div><dt>Opened</dt><dd>{new Date(t.openedAt).toLocaleString()}</dd></div><div><dt>Closed</dt><dd>{new Date(t.closedAt).toLocaleString()}</dd></div><div><dt>Entry / exit digit</dt><dd>{number(t.entryDigit)} / {number(t.exitDigit)}</dd></div></dl><p className="micro muted" style={{overflowWrap:'anywhere'}}>{t.error??t.gateReasons.join(' ')}</p></details></td></tr>)}</tbody></table></div>;
+}
+
+export function ExecutionConsole({compact=false}:{compact?:boolean}){
+ const state=useApp((s)=>s.botState),detail=useApp((s)=>s.botDetail),bot=useApp((s)=>s.bot),execution=useApp((s)=>s.execution),signal=useApp((s)=>s.botSignal),journal=useApp((s)=>s.executionJournal),trades=useApp((s)=>s.trades),session=useApp((s)=>s.session),mode=useApp((s)=>s.settings.mode),resets=useApp((s)=>s.sessionResets);
+ const [includePast,setIncludePast]=useState(false);
+ const [tab,setTab]=useState<'summary'|'transactions'|'journal'>('summary'),[filter,setFilter]=useState('all'),[notice,setNotice]=useState(''),[clock,setClock]=useState(0);
+ useEffect(()=>{const timer=setInterval(()=>setClock(Date.now()),1000);return()=>clearInterval(timer);},[]);
+ const account=session?.loginid;const resetAt=resets?.[`${mode}:${account??'none'}`]??0;
+ const own=(e:{mode:string;accountLoginid?:string;at?:number;closedAt?:number})=>e.mode===mode&&(!account||e.accountLoginid===account)&&(e.at??e.closedAt??0)>resetAt;
+ const entries=(journal??[]).filter(own);
+ const active=execution&&own(execution)?execution:null;
+ const runId=active?.runId??entries[0]?.runId;
+ const records=trades.filter((t)=>own(t)&&!!runId&&t.runId===runId);
+ const metrics=computeMetrics(records,0),last=records.find((t)=>!t.error);
+ const pending=bot?.hasPendingOrder()??false,running=['starting','running','paused','stopping'].includes(state);
+ const current=active&&['pricing','buying','open','stopping','error','halted'].includes(active.phase)&&(!active.contractId||!records.some((t)=>!t.error&&t.contractId===active.contractId))?active:null;
+ const staleSignal=signal&&clock>0&&clock-signal.lastTickAt>5000;
+ const accountJournal=(journal??[]).filter((e)=>e.mode===mode&&(!account||e.accountLoginid===account));
+ const journalRecords=includePast?accountJournal:entries;
+ const accepted=current?.contractId&&!records.some((t)=>t.contractId===current.contractId)?1:0;
+ const exportJournal=()=>{const a=document.createElement('a');const url=URL.createObjectURL(new Blob([JSON.stringify(journalRecords,null,2)],{type:'application/json'}));a.href=url;a.download='execution-journal.json';a.click();URL.revokeObjectURL(url);};
+ const visible=journalRecords.filter((e)=>filter==='all'||(filter==='signals'?['waiting','qualified'].includes(e.phase):filter==='errors'?['error','halted'].includes(e.phase):['pricing','buying','open','settled'].includes(e.phase)));
+ return <div className="stack" style={{gap:14}}>
+  <div className="button-row space-between"><span className={`badge ${running?'badge-green':'badge-neutral'}`}>{active?.phase??state}</span><span className="micro muted">{account??'No connected account'} · {mode==='deriv_real'?'REAL':'DEMO'} · {session?.currency??'—'}</span></div>
+  <p className="micro" role="status">{active?.detail||detail||'No session running. The bot waits for validated entry conditions.'}</p>
+  {signal&&running&&!['open','buying'].includes(active?.phase??'')&&<Notice tone={signal.status==='qualified'&&!staleSignal?'success':'info'}>{staleSignal?'Signal expired: waiting for fresh live evidence.':signal.reason}<small style={{display:'block'}}>Current leg: {signal.contractType} · suffix {signal.pattern} · held-out {signal.validation.hits}/{signal.validation.total} · new live {signal.forward.hits}/{signal.forward.total}. No order is allowed on insufficient evidence.</small></Notice>}
+  <div className="rail-tabs" role="tablist" aria-label={compact?'Monitor views':'Session views'}>{(['summary','transactions','journal'] as const).map((name)=><button key={name} role="tab" aria-selected={tab===name} onClick={()=>setTab(name)}>{name[0].toUpperCase()+name.slice(1)}</button>)}</div>
+  {current?.phase==='halted'&&current.contractId&&<Notice tone="error">Broker outcome may be unresolved. Verify this contract in Deriv before manually restarting; no result is assumed.</Notice>}
+  {tab==='summary'&&<div role="tabpanel" className="stack" style={{gap:12}}>
+   {current?<div className="step-preview"><strong>{current.symbol} · {current.contractType} · {current.phase}</strong><dl className="detail-list"><div><dt>Broker contract</dt><dd>{current.contractId??'Awaiting acceptance'}</dd></div><div><dt>Stake / potential payout</dt><dd>{cash(current.stake)} / {cash(current.potentialPayout)}</dd></div><div><dt>Entry / latest spot</dt><dd>{number(current.entryPrice)} / {number(current.currentSpot)}</dd></div><div><dt>Broker value / live P/L</dt><dd>{cash(current.contractValue)} / {cash(current.profit)}</dd></div></dl></div>:last?<div className="step-preview"><strong>{last.symbol} · {last.contractType} · Closed</strong><p className={last.profit>=0?'positive':'negative'}>Net {signed(last.profit)} {last.currency??session?.currency}</p><p className="micro">Stake {cash(last.stake)} · gross return {cash(last.payout)} · entry {number(last.entryPrice)} → exit {number(last.exitPrice)}</p></div>:<Empty title="Waiting for an entry">No purchased contract is inferred from a signal or a proposal.</Empty>}
+   <div className={compact?'stack':'metric-grid'}><Metric label="Total stake" value={cash(metrics.totalStaked+(accepted?(current?.stake??0):0))} detail="Paid stake; includes a broker-accepted open contract"/><Metric label="Total payout" value={cash(metrics.totalPayout)} detail="Actual gross returns, not potential payouts"/><Metric label="Purchased runs" value={metrics.settledCount+accepted} detail={`${metrics.settledCount} settled`}/><Metric label="Contracts lost / won" value={`${metrics.losses} / ${metrics.wins}`}/><Metric label="Net profit / loss" value={signed(metrics.netProfit)} positive={metrics.netProfit>=0} detail={session?.currency??'Account currency'}/></div>
+  </div>}
+  {tab==='transactions'&&<div role="tabpanel"><BrokerTransactions records={records}/></div>}
+  {tab==='journal'&&<div role="tabpanel" className="stack" style={{gap:12}}><div className="button-row"><select aria-label="Journal filter" value={filter} onChange={(e)=>setFilter(e.target.value)}><option value="all">All events</option><option value="signals">Signal decisions</option><option value="contracts">Contract lifecycle</option><option value="errors">Errors / halts</option></select><Button variant="secondary" disabled={!journalRecords.length} onClick={exportJournal}>Download journal</Button></div><label className="micro"><input type="checkbox" checked={includePast} onChange={(e)=>setIncludePast(e.target.checked)}/> Include prior sessions for this account</label><div className="journal">{visible.length?visible.slice(0,150).map((e)=><div className={`journal-entry ${e.phase==='error'?'error':''}`} key={e.id}><time>{new Date(e.at).toLocaleString()} · {e.mode==='deriv_real'?'REAL':'DEMO'} · {e.accountLoginid??'Unattributed'}</time><p><strong>{e.phase.toUpperCase()}</strong> · {e.detail}</p><small>{e.symbol} · {e.contractType} · {e.contractId?`#${e.contractId}`:''}</small></div>):<Empty title="No matching journal events"/>}</div></div>}
+  <div className="button-row">{running&&<Button variant="danger" onClick={()=>useApp.getState().stopBot('User requested Stop')}>Stop bot</Button>}<Button variant="secondary" disabled={running||pending} onClick={()=>void useApp.getState().resetSessionView().then((r)=>setNotice(r.message))}>Reset session view</Button></div>
+  {pending&&<p className="micro muted">An entry/settlement is pending. Reset and account switching remain locked until it resolves. Stop blocks future buys; it does not cancel an accepted contract.</p>}
+  {notice&&<Notice>{notice}</Notice>}
+  <p className="micro muted">Session totals are scoped to this account and run. Reset keeps historical transactions and journal. This browser must remain open; reload never resumes trading automatically.</p>
+ </div>;
+}

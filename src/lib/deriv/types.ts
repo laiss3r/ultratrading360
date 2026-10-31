@@ -62,6 +62,8 @@ export interface Proposal {
 }
 
 export interface OpenContract {
+  bid_price?: number;
+  date_settlement?: number;
   contract_id: number;
   buy_price: number;
   payout: number;
@@ -69,7 +71,7 @@ export interface OpenContract {
   is_sold: 0 | 1;
   is_expired: 0 | 1;
   is_valid_to_sell: 0 | 1;
-  status: 'open' | 'sold' | 'won' | 'lost';
+  status: 'open' | 'sold' | 'won' | 'lost' | 'cancelled';
   currency: string;
   contract_type: string;
   underlying_symbol?: string;

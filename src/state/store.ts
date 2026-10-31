@@ -1,4 +1,6 @@
 'use client';
+import type { ExecutionEvent } from '@/lib/engine/execution';
+import type { SignalEvidence } from '@/lib/signals/patterns';
 
 import { create } from 'zustand';
 import { watchClassicBalances, type BalanceStatus, type BalanceUpdate } from '@/lib/deriv/classicBalances';
@@ -12,6 +14,7 @@ import { createStrategy, effectiveStrategyLimits, validateStrategy, type Strateg
 import { computeMetrics, type PerformanceMetrics } from '@/lib/metrics';
 import {
   DEFAULT_SETTINGS,
+  appendExecutionEvent, loadExecutionJournal, loadSessionResets, saveSessionResets,
   appendTrades,
   listStrategies,
   listTrades,
@@ -78,6 +81,10 @@ interface State {
   bot: TradingBot | null;
   botState: BotState;
   botDetail: string;
+  execution: ExecutionEvent|null;
+  executionJournal: ExecutionEvent[];
+  botSignal: SignalEvidence|null;
+  sessionResets: Record<string,number>;
   trades: TradeRecord[];
   metrics: PerformanceMetrics;
   risk: RiskManager;
@@ -167,6 +174,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
   bot: null,
   botState: 'idle',
   botDetail: '',
+  execution: null, executionJournal: [], botSignal: null, sessionResets: {},
   trades: [],
   metrics: computeMetrics([], 0),
   risk: new RiskManager(DEFAULT_SETTINGS.limits, DEFAULT_SETTINGS.recovery, 0),
@@ -188,11 +196,13 @@ export const useApp = create<State & Actions>()((set, get) => ({
     const settings = await loadSettings();
     const strategies = await listStrategies();
     const trades = await listTrades();
+    const executionJournal=await loadExecutionJournal();
+    const sessionResets=await loadSessionResets();
     const risk = new RiskManager(settings.limits, settings.recovery, 0);
     set({
       settings,
       strategies: strategies.length ? strategies : [createStrategy({ name: 'Starter — odd digit' })],
-      trades,
+      trades, executionJournal, sessionResets,
       metrics: computeMetrics(trades, 0),
       risk,
       riskSnapshot: risk.getSnapshot(),
@@ -253,6 +263,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
     const next = { ...get().settings, ...patch };
     // The risk manager is the single source of truth for limits; keep it in sync.
     next.limits = { ...next.limits, realTradingAcknowledged: next.realTradingAcknowledged };
+    if(!next.limits.tradingEnabled&&['starting','running','paused'].includes(get().botState))get().stopBot('Trading permission disabled; accepted contracts may still settle.');
     set({ settings: next });
     get().risk.limits = get().bot ? effectiveStrategyLimits(next.limits, get().bot!.strategy) : next.limits;
     get().risk.recovery = next.recovery;
@@ -553,6 +564,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
 
   async applyMode(mode: AccountMode, initial = false): Promise<void> {
     const cur = get();
+    if(cur.settings.mode!==mode)await get().setSettings({mode});
     // Tear down any running bot and the old provider before switching provenance.
     cur.stopBot(`mode changed to ${mode}`);
     cur.provider?.disconnect();
@@ -822,6 +834,15 @@ export const useApp = create<State & Actions>()((set, get) => ({
     const risk = new RiskManager(effectiveStrategyLimits(get().settings.limits, s), s.progression ? { ...s.recovery, enabled: false } : s.recovery, startingBalance);
 
     const bot = new TradingBot(s, provider, risk, {
+      onSignal:(e)=>set({botSignal:e}),
+      onExecution:(e)=>{
+        const previous=get().execution;
+        set({execution:e});
+        if(previous?.phase!==e.phase||previous?.contractId!==e.contractId||previous?.detail!==e.detail){
+          set({executionJournal:[e,...get().executionJournal].slice(0,500)});
+          void appendExecutionEvent(e).catch(()=>get().pushLog('warn','Journal persistence failed; broker execution state remains visible.'));
+        }
+      },
       onStateChange: (st, detail) => {
         set({ botState: st, botDetail: detail ?? '' });
         if (st === 'halted' || st === 'error') get().pushLog('warn', `Bot ${st}: ${detail ?? ''}`);
@@ -829,8 +850,8 @@ export const useApp = create<State & Actions>()((set, get) => ({
         if (st === 'stopped') get().pushLog('info', `Bot stopped: ${detail ?? ''}`);
         set({ riskSnapshot: risk.getSnapshot() });
       },
-      onTrade: async (t) => {
-        await appendTrades([t]);
+      onTrade: (t) => {
+        void appendTrades([t]).catch(()=>get().pushLog('warn','Trade persistence failed; export the current broker result.'));
         const trades = [t, ...get().trades].slice(0, 5000);
         set({ trades, metrics: computeMetrics(trades, startingBalance), riskSnapshot: risk.getSnapshot() });
         get().pushLog(
@@ -844,11 +865,12 @@ export const useApp = create<State & Actions>()((set, get) => ({
       onRisk: (d) => {
         if (!d.allowed && d.reasons.length) get().pushLog('warn', `Risk manager refused a trade: ${d.reasons.join(' ')}`);
       },
-    }, startingBalance);
+    }, startingBalance, {accountLoginid:get().session?.loginid});
 
-    set({ bot, risk, riskSnapshot: risk.getSnapshot(), activeStrategyId: id, botState: 'starting', botDetail: '' });
+    set({ bot, risk, riskSnapshot: risk.getSnapshot(), activeStrategyId: id, botState: 'starting', botDetail: '', botSignal:null, execution:null });
     try {
       await bot.start(800);
+      if(bot.state!=='running')return {ok:false,message:'Bot start was cancelled or halted.'};
       set({ botRuns: get().botRuns + 1 });
       return { ok: true, message: 'Bot running.' };
     } catch (e) {
@@ -873,7 +895,16 @@ export const useApp = create<State & Actions>()((set, get) => ({
     }
   },
 
+  async resetSessionView(){
+    if(get().bot?.hasPendingOrder()||['starting','running','paused','stopping'].includes(get().botState))return {ok:false,message:'Stop the bot and wait for its contract before resetting.'};
+    const key=`${get().settings.mode}:${get().session?.loginid??'none'}`;
+    const resets={...get().sessionResets,[key]:Date.now()};
+    set({sessionResets:resets,execution:null,botSignal:null,bot:null,botState:'idle',botDetail:''});
+    await saveSessionResets(resets);return {ok:true,message:'Session view reset. Historical transactions and journal are retained.'};
+  },
+
   async clearTrades(): Promise<void> {
+    if(get().bot?.hasPendingOrder()||['starting','running','paused','stopping'].includes(get().botState))throw new Error('Stop the bot and wait for settlement before clearing history.');
     const { clearTrades } = await import('@/lib/persistence/db');
     await clearTrades();
     // Resetting the stats also resets the run counter, exactly as Deriv Bot's
@@ -904,6 +935,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
 }));
 
 interface Actions {
+  resetSessionView: () => Promise<{ok:boolean;message:string}>;
   hydrate: () => Promise<void>;
   loadConfig: () => Promise<void>;
   pushLog: (level: LogEntry['level'], text: string) => void;

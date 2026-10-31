@@ -37,6 +37,7 @@ export class DerivClient {
   private pending = new Map<number, Resolver>();
   private subscriptionHandlers = new Map<string, (m: DerivMessage) => void>();
   /** Requests that must be replayed after a reconnect, keyed by a caller-chosen id. */
+  private handlerSubscriptions = new Map<(m:DerivMessage)=>void,Set<string>>();
   private replayable = new Map<string, Record<string, unknown>>();
   private reconnectAttempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -115,7 +116,7 @@ export class DerivClient {
         const subId = msg.subscription?.id;
         if (subId) {
           const h = this.subscriptionHandlers.get(String(id ?? subId));
-          h?.(msg);
+          if(h){this.subscriptionHandlers.set(subId,h);const ids=this.handlerSubscriptions.get(h)??new Set<string>();ids.add(subId);this.handlerSubscriptions.set(h,ids);h(msg);}
         }
       };
 
@@ -129,6 +130,7 @@ export class DerivClient {
         this.stopPing();
         this.ws = null;
         this.failAllPending(new Error('WebSocket closed'));
+        this.handlerSubscriptions.clear();
         if (this.intentionallyClosed) {
           this.setStatus('closed');
           return;
@@ -269,30 +271,27 @@ export class DerivClient {
     this.subscriptionHandlers.set(id, onFrame);
     this.subscriptionHandlers.set(replayKey, onFrame);
     this.replayable.set(replayKey, { ...request, subscribe: 1 });
+    if(first.subscription?.id){this.subscriptionHandlers.set(first.subscription.id,onFrame);this.handlerSubscriptions.set(onFrame,new Set([first.subscription.id]));}
     return first;
   }
 
   /** Cancel one subscription. */
   async forget(subscriptionId: string, replayKey?: string): Promise<void> {
-    if (replayKey) {
-      const handler = this.subscriptionHandlers.get(replayKey);
-      this.replayable.delete(replayKey);
-      if (handler) for (const [key, value] of this.subscriptionHandlers) if (value === handler) this.subscriptionHandlers.delete(key);
+    const handler=this.subscriptionHandlers.get(replayKey??subscriptionId);
+    const ids=new Set([subscriptionId,...(handler?this.handlerSubscriptions.get(handler)??[]:[])]);
+    if(replayKey)this.replayable.delete(replayKey);
+    if(handler){
+      for(const [key,value] of this.subscriptionHandlers)if(value===handler){this.subscriptionHandlers.delete(key);this.replayable.delete(key);}
+      this.handlerSubscriptions.delete(handler);
     }
-    for (const [k, req] of this.replayable) {
-      if (JSON.stringify(req).includes(subscriptionId)) this.replayable.delete(k);
-    }
-    try {
-      await this.send({ forget: subscriptionId });
-    } catch {
-      /* already gone */
-    }
+    for(const id of ids){try{await this.send({forget:id});}catch{/* already gone */}}
   }
 
   /** Cancel every subscription of a type, e.g. 'ticks'. */
   async forgetAll(...types: string[]): Promise<void> {
     this.replayable.clear();
     this.subscriptionHandlers.clear();
+    this.handlerSubscriptions.clear();
     try {
       await this.send({ forget_all: types.length ? types : ['ticks', 'candles', 'proposal_open_contract'] });
     } catch {
@@ -308,6 +307,7 @@ export class DerivClient {
     this.stopPing();
     this.replayable.clear();
     this.subscriptionHandlers.clear();
+    this.handlerSubscriptions.clear();
     this.failAllPending(new Error('Client closed'));
     const ws = this.ws;
     this.ws = null;

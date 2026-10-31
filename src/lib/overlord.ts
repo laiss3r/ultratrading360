@@ -30,11 +30,12 @@ export function overlordStrategy(c:OverlordConfig,market:string,currency:string,
   const errors=validateOverlord(c);if(errors.length)throw new Error(errors.join(' '));
   if(c.stake<limits.minStake||c.stake>limits.maxStake)throw new Error(`Stake must respect your global limits (${limits.minStake}–${limits.maxStake}).`);
   return createStrategy({name:`Overlord · ${CONTRACT_LABELS[c.contractType]}`,market,currency,contractType:c.contractType,barrier:ContractService.requiresBarrier(c.contractType)?c.barrier:undefined,duration:c.duration,durationUnit:'t',stake:c.stake,cooldownSeconds:.5,maxTrades:c.maxTrades,maxExposure:limits.maxSessionExposure,
+    signalGate:{version:1},
     entry:{id:'root',op:'AND',children:[{id:'overlord-entry',kind:'always'}]},
     limits:{...limits,tradingEnabled:false,realTradingAcknowledged:false,maxSessionProfit:c.targetProfit,maxSessionLoss:c.stopLoss,maxTrades:c.maxTrades},
     progression:{kind:c.martingale?'martingale':'flat',unit:c.stake,multiplier:c.multiplier,stepLimit:c.maxSteps},
     contractRotation:c.recoveryEnabled?{mode:c.recoveryMode,recovery:{contractType:c.recoveryContract,barrier:ContractService.requiresBarrier(c.recoveryContract)?c.recoveryBarrier:undefined},alternateTimes:c.alternateTimes}:undefined,
-    notes:'Continuous sequential entries after settlement/cooldown. Market ranking is descriptive, not a prediction. Recovery changes contracts; martingale changes stakes. Global risk limits always win.'});
+    notes:'Entries wait for qualified, fresh live patterns, held-out and forward validation, and actual broker payout checks. Recovery changes contracts; martingale changes stakes. Global risk limits always win.'});
 }
 export interface MarketObservation {symbol:string;name:string;sample:number;hits:number;rate:number;lower:number;upper:number;baseline:number|null;from:number;to:number;scannedAt:number}
 export function observeMarket(symbol:string,name:string,quotes:Quote[],contractType:ContractType,barrier:number,duration=1):MarketObservation {

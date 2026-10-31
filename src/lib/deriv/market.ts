@@ -4,6 +4,7 @@ import { lastDigit } from './digits';
 
 /** Market-data operations. All of these work on the PUBLIC socket with no credential. */
 export class MarketDataService {
+  private streamSequence = 0;
   constructor(private client: DerivClient) {}
 
   async activeSymbols(marketFilter = 'synthetic_index'): Promise<ActiveSymbol[]> {
@@ -60,10 +61,12 @@ export class MarketDataService {
       const t = m.tick as Tick | undefined;
       if (t && typeof t.quote === 'number') onTick(t);
     };
-    const first = await this.client.subscribe({ ticks: symbol }, handle);
+    const replayKey = `ticks_${symbol}_${++this.streamSequence}`;
+    const first = await this.client.subscribe({ ticks: symbol }, handle, replayKey);
     subId = (first.subscription?.id as string) ?? null;
+    handle(first);
     return () => {
-      if (subId) void this.client.forget(subId);
+      if (subId) void this.client.forget(subId, replayKey);
     };
   }
 

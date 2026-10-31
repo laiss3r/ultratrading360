@@ -1,3 +1,4 @@
+import { requiredBrokerNumber } from './numbers';
 import { DerivClient } from './client';
 import type { ContractSpec, Proposal } from './types';
 
@@ -63,7 +64,8 @@ export class ContractService {
     if (req.barrier !== undefined) body.barrier = String(req.barrier);
 
     const res = await this.client.send<{ proposal: Proposal }>(body);
-    const p = res.proposal;
+    const p = {...res.proposal,ask_price:requiredBrokerNumber(res.proposal.ask_price,'proposal ask'),payout:requiredBrokerNumber(res.proposal.payout,'proposal payout')};
+    if(p.ask_price<=0||p.payout<=0||typeof p.id!=='string'||!p.id)throw new Error('Broker proposal is invalid; refusing purchase.');
     // Deriv quotes `payout` for basis=stake and `ask_price` for basis=payout; normalise both.
     const stake = req.basis === 'stake' ? p.ask_price : req.amount;
     const payout = req.basis === 'payout' ? p.ask_price : p.payout;

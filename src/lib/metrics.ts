@@ -41,11 +41,11 @@ export interface PerformanceMetrics {
 export function computeMetrics(trades: TradeRecord[], startingBalance = 0): PerformanceMetrics {
   const settled = trades.filter((t) => !t.error);
   const errors = trades.filter((t) => !!t.error);
-  const wins = settled.filter((t) => t.won);
-  const losses = settled.filter((t) => !t.won);
+  const wins = settled.filter((t) => t.profit>0);
+  const losses = settled.filter((t) => t.profit<0);
 
   const totalStaked = round2(settled.reduce((a, t) => a + t.stake, 0));
-  const totalPayout = round2(settled.reduce((a, t) => a + (t.won ? t.payout : 0), 0));
+  const totalPayout = round2(settled.reduce((a, t) => a + t.payout, 0));
   const netProfit = round2(settled.reduce((a, t) => a + t.profit, 0));
   const grossWin = round2(wins.reduce((a, t) => a + t.profit, 0));
   const grossLoss = round2(Math.abs(losses.reduce((a, t) => a + t.profit, 0)));

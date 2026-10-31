@@ -2,10 +2,11 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { ArrowUpRight, Download, Play, Square, Pause, ChevronRight, ShieldCheck } from 'lucide-react';
+import { Download, Play, Square, Pause, ChevronRight } from 'lucide-react';
 import { useApp } from '@/state/store';
 import { effectiveStrategyLimits } from '@/lib/engine/strategies';
 import type { Quote } from '@/lib/engine/provider';
+import { ExecutionConsole, BrokerTransactions } from './ExecutionConsole';
 import { Button, Empty, Notice, Panel } from './ui';
 
 export const money = (value: number, currency = 'USD') => `${value.toFixed(2)} ${currency}`;
@@ -73,7 +74,7 @@ export function RunButton({ strategyId, prepare, children = 'Run strategy' }: { 
     try { const result = await useApp.getState().runStrategy(currentId ?? ''); if(result.ok) setConfirm(false); else setMessage(result.message); }
     catch(e) { setMessage((e as Error).message); } finally { setPending(false); }
   };
-  return <><Button busy={pending} onClick={()=>void open()}><Play size={14}/>{children}</Button>{message&&!confirm&&<Notice tone="error">{message}</Notice>}{confirm && <div className="modal-backdrop" onClick={()=>!pending&&setConfirm(false)}><div role="dialog" aria-modal="true" aria-labelledby={`confirm-${currentId}`} className="confirm-dialog" onClick={(e)=>e.stopPropagation()}><span className="eyebrow">CONFIRM BEFORE TRADING</span><h2 id={`confirm-${currentId}`}>{strategy?.name ?? 'Run strategy'}</h2><p>This starts genuine Deriv orders on <strong>{session ? `${session.loginid} (${session.isVirtual?'Demo':'REAL MONEY'})` : 'no connected account'}</strong>. Open contracts may still settle after stopping.</p><dl className="detail-list"><div><dt>Base stake</dt><dd>{strategy?money(strategy.stake,strategy.currency):'—'}</dd></div><div><dt>Contract</dt><dd>{strategy?.contractType}{strategy?.barrier!==undefined?` · ${strategy.barrier}`:''}</dd></div><div><dt>Duration</dt><dd>{strategy?.duration} {strategy?.durationUnit==='t'?'ticks':strategy?.durationUnit}</dd></div><div><dt>Maximum entries</dt><dd>{limits?.maxTrades}</dd></div><div><dt>Profit target / stop loss</dt><dd>{limits?.maxSessionProfit || 'Off'} / {limits?.maxSessionLoss}</dd></div><div><dt>Stake plan / maximum stake</dt><dd>{strategy?.progression?.kind ?? 'Fixed'} / {limits?.maxStake}</dd></div>{strategy?.contractRotation&&<div><dt>Recovery contract</dt><dd>{strategy.contractRotation.recovery.contractType} · {strategy.contractRotation.mode}</dd></div>}</dl>{message&&<Notice tone="error">{message}</Notice>}<div className="button-row"><Button busy={pending} onClick={()=>void run()}>Confirm & run</Button><Button variant="secondary" disabled={pending} onClick={()=>setConfirm(false)}>Cancel</Button></div><Link className="text-link" href="/risk" onClick={()=>setConfirm(false)}>Review trading permissions →</Link></div></div>}</>;
+  return <><Button busy={pending} onClick={()=>void open()}><Play size={14}/>{children}</Button>{message&&!confirm&&<Notice tone="error">{message}</Notice>}{confirm && <div className="modal-backdrop" onClick={()=>!pending&&setConfirm(false)}><div role="dialog" aria-modal="true" aria-labelledby={`confirm-${currentId}`} className="confirm-dialog" onClick={(e)=>e.stopPropagation()}><span className="eyebrow">CONFIRM BEFORE TRADING</span><h2 id={`confirm-${currentId}`}>{strategy?.name ?? 'Run strategy'}</h2><p>This starts genuine Deriv orders on <strong>{session ? `${session.loginid} (${session.isVirtual?'Demo':'REAL MONEY'})` : 'no connected account'}</strong>. Open contracts may still settle after stopping.</p><dl className="detail-list"><div><dt>Base stake</dt><dd>{strategy?money(strategy.stake,strategy.currency):'—'}</dd></div><div><dt>Contract</dt><dd>{strategy?.contractType}{strategy?.barrier!==undefined?` · ${strategy.barrier}`:''}</dd></div><div><dt>Duration</dt><dd>{strategy?.duration} {strategy?.durationUnit==='t'?'ticks':strategy?.durationUnit}</dd></div><div><dt>Maximum entries</dt><dd>{limits?.maxTrades}</dd></div><div><dt>Profit target / stop loss</dt><dd>{limits?.maxSessionProfit || 'Off'} / {limits?.maxSessionLoss}</dd></div><div><dt>Stake plan / maximum stake</dt><dd>{strategy?.progression?.kind ?? 'Fixed'} / {limits?.maxStake}</dd></div>{strategy?.contractRotation&&<div><dt>Recovery contract</dt><dd>{strategy.contractRotation.recovery.contractType} · {strategy.contractRotation.mode}</dd></div>}</dl>{(strategy?.signalGate||strategy?.name.startsWith('Overlord ·'))&&<Notice>Signal-gated on both Demo and Real: waits for held-out and new live evidence, then checks the actual payout. No signal means no buy.</Notice>}{message&&<Notice tone="error">{message}</Notice>}<div className="button-row"><Button busy={pending} onClick={()=>void run()}>Confirm & run</Button><Button variant="secondary" disabled={pending} onClick={()=>setConfirm(false)}>Cancel</Button></div><Link className="text-link" href="/risk" onClick={()=>setConfirm(false)}>Review trading permissions →</Link></div></div>}</>;
 }
 
 export function SessionRail() {
@@ -81,37 +82,35 @@ export function SessionRail() {
   const detail = useApp((s)=>s.botDetail);
   const strategies = useApp((s)=>s.strategies);
   const activeId = useApp((s)=>s.activeStrategyId);
-  const snap = useApp((s)=>s.riskSnapshot);
-  const log = useApp((s)=>s.log);
   const session = useApp((s)=>s.session);
   const enabled = useApp((s)=>s.settings.limits.tradingEnabled);
   const tradingLoginid = useApp((s)=>s.tradingLoginid);
-  const [tab,setTab]=useState<'summary'|'journal'>('summary');
   const active = strategies.find((s)=>s.id===activeId)??strategies[0];
   const running = ['starting','running','paused','stopping'].includes(state);
   return <><div className="session-head"><span className="eyebrow">YOUR WORKSPACE</span><h2>Session monitor</h2><span className={`badge ${state==='running'?'badge-green':'badge-neutral'}`}>{state==='idle'?'Not running':state}</span></div>
     <div className="session-controls"><label className="field"><span>Active strategy</span><select aria-label="Active strategy" value={active?.id??''} disabled={running} onChange={(e)=>useApp.getState().setActiveStrategy(e.target.value)}>{!strategies.length&&<option value="">Create a strategy first</option>}{strategies.map((s)=><option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
     <div className="button-row">{running ? <><Button variant="danger" onClick={()=>useApp.getState().stopBot('user stopped')}><Square size={14}/>Stop</Button>{state==='paused'?<Button variant="secondary" onClick={()=>useApp.getState().resumeBot()}>Resume</Button>:<Button variant="secondary" onClick={()=>useApp.getState().pauseBot()}><Pause size={14}/>Pause</Button>}</> : active ? <RunButton strategyId={active.id}/> : <Link className="button button-primary" href="/builder">Build a bot <ChevronRight size={14}/></Link>}</div>
     <p className="micro muted">{detail||'Your bot runs in this browser. Keep this tab open.'}</p></div>
-    <div className="rail-tabs"><button aria-pressed={tab==='summary'} onClick={()=>setTab('summary')}>Summary</button><button aria-pressed={tab==='journal'} onClick={()=>setTab('journal')}>Journal <small>{log.length}</small></button></div>
-    {tab==='summary'?<div className="rail-summary"><div className="session-profit"><span>Session profit / loss</span><strong className={snap.sessionPnl>=0?'positive':'negative'}>{signed(snap.sessionPnl)}</strong><small>{session?.currency??'Account currency'} · {snap.tradesThisSession} settled entries</small></div><dl className="detail-list"><div><dt>Open exposure</dt><dd>{snap.openExposure.toFixed(2)}</dd></div><div><dt>Total session stake</dt><dd>{snap.sessionExposure.toFixed(2)}</dd></div><div><dt>Consecutive losses</dt><dd>{snap.consecutiveLosses}</dd></div><div><dt>Account trading channel</dt><dd>{session&&tradingLoginid===session.loginid?'Verified':'Not connected'}</dd></div><div><dt>Trading permission</dt><dd className={enabled?'positive':''}>{enabled?'Enabled':'Disabled'}</dd></div></dl>{snap.halted&&<Notice tone="error">{snap.haltDetail??snap.haltReason??'Risk limit reached.'}</Notice>}<Link href="/risk" className="rail-link"><ShieldCheck size={17}/>Risk controls<ArrowUpRight size={15}/></Link><p className="rail-disclaimer">Every trade can lose its stake. Progressions increase exposure; they do not create an edge.</p></div>:<div className="journal">{log.length?log.slice(-40).reverse().map((x,i)=><div key={`${x.at}-${i}`} className={`journal-entry ${x.level}`}><time>{new Date(x.at).toLocaleTimeString()}</time><p>{x.text}</p></div>):<Empty title="No events yet">Connection and strategy events appear here.</Empty>}</div>}
+    <div className="session-controls"><dl className="detail-list"><div><dt>Account trading channel</dt><dd>{session&&tradingLoginid===session.loginid?'Verified':'Not connected'}</dd></div><div><dt>Trading permission</dt><dd>{enabled?'Enabled':'Disabled'}</dd></div></dl></div>
+    <div style={{padding:'16px'}}><ExecutionConsole compact/></div>
   </>;
 }
 
 export function TradeTable({ limit = 100 }: { limit?: number }) {
   const trades = useApp((s)=>s.trades);
   const mode = useApp((s)=>s.settings.mode);
-  const filtered = trades.filter((t)=>t.mode===mode).slice(0,limit);
-  if(!filtered.length) return <Empty title="No settled trades yet">Only genuine Deriv contract results recorded in this browser appear here. {mode==='deriv_demo'?'Demo':'Real'} history is shown separately.</Empty>;
-  return <div className="table-scroll"><table><thead><tr><th>Time</th><th>Strategy / contract</th><th>Market</th><th>Stake</th><th>Net P/L</th><th>Result</th></tr></thead><tbody>{filtered.map((t)=><tr key={t.id}><td>{new Date(t.closedAt).toLocaleTimeString()}</td><td><strong>{t.strategyName}</strong><small>{t.contractType}</small></td><td>{t.symbol}</td><td>{t.stake.toFixed(2)}</td><td className={t.profit>=0?'positive':'negative'}>{signed(t.profit)}</td><td><span className={`badge ${t.error?'badge-neutral':t.won?'badge-green':'badge-red'}`}>{t.error?'Error':t.won?'Won':'Lost'}</span></td></tr>)}</tbody></table></div>;
+  const account=useApp((s)=>s.session?.loginid);
+  const filtered = trades.filter((t)=>t.mode===mode&&(!account||t.accountLoginid===account)).slice(0,limit);
+  return <BrokerTransactions records={filtered}/>;
 }
 
 export function ExportTrades() {
   const exportCsv=()=>{
     const mode=useApp.getState().settings.mode;
     const clean=(v:unknown)=>`"${String(v??'').replace(/^[=+@-]/,"'").replaceAll('"','""')}"`;
-    const rows=useApp.getState().trades.filter((t)=>t.mode===mode).map((t)=>[new Date(t.closedAt).toISOString(),t.id,t.strategyName,t.symbol,t.contractType,t.stake,t.profit,t.won,t.mode,t.source]);
-    const csv=[['closed_at','id','strategy','symbol','contract','stake','profit','won','mode','source'],...rows].map((r)=>r.map(clean).join(',')).join('\n');
+    const account=useApp.getState().session?.loginid;
+    const rows=useApp.getState().trades.filter((t)=>t.mode===mode&&(!account||t.accountLoginid===account)).map((t)=>[new Date(t.closedAt).toISOString(),t.id,t.strategyName,t.symbol,t.contractType,t.stake,t.profit,t.won,t.mode,t.source,t.accountLoginid??'Unattributed',t.contractId??'',t.entryPrice??'',t.exitPrice??'',t.duration??'']);
+    const csv=[['closed_at','id','strategy','symbol','contract','stake','profit','won','mode','source','account','contract_id','entry_spot','exit_spot','duration'],...rows].map((r)=>r.map(clean).join(',')).join('\n');
     const url=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));const a=document.createElement('a');a.href=url;a.download='ultratrading-trades.csv';a.click();URL.revokeObjectURL(url);
   };
   return <Button variant="secondary" onClick={exportCsv}><Download size={15}/>Export CSV</Button>;

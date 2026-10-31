@@ -19,6 +19,7 @@ const REST_ROWS = [
   { account_id: 'DOT90004580', currency: 'USD', balance: 10000, group: 'row', status: 'active', account_type: 'demo' },
   { account_id: 'ROT90004581', currency: 'USD', balance: 0, group: 'row', status: 'active', account_type: 'real' },
 ];
+if(process.env.STUB_TRADING==='1'&&process.env.STUB_REAL_FUNDS==='1')REST_ROWS[1].balance=1000;
 const CLASSIC_LIST = [
   { loginid: 'VRTC1234567', currency: 'USD', balance: 4172.24, is_virtual: 1 },
   { loginid: 'CR1234567', currency: 'USD', balance: 0, is_virtual: 0 },
@@ -89,28 +90,30 @@ const market = new WebSocketServer({ port: 4519, host: '127.0.0.1' });
 market.on('connection', (ws, req) => {
   const tickTimers = new Map();
   let balanceReq = null;
-  let fixtureBalance = req.url.includes('DOT') ? 10000 : 0;
+  let fixtureBalance = req.url.includes('DOT') ? 10000 : process.env.STUB_REAL_FUNDS==='1'?1000:0;
   ws.on('message', (raw) => {
     const m = JSON.parse(raw.toString());
     if (m.ping) return ws.send(JSON.stringify({ msg_type: 'ping', ping: m.ping }));
     if (m.balance) { balanceReq=m; return ws.send(JSON.stringify({req_id:m.req_id, subscription:{id:'balance'}, balance:{balance:fixtureBalance,currency:'USD'}})); }
     if (process.env.STUB_TRADING === '1' && m.proposal) {
       const id=`fixture-proposal-${++proposalIndex}`;proposals.set(id,{...m});
-      return ws.send(JSON.stringify({req_id:m.req_id,msg_type:'proposal',proposal:{id,ask_price:m.amount,payout:Math.round(m.amount*1.95*100)/100,spot:100,spot_value:'100.00',date_start:1700000000,date_expiry:1700000003,longcode:'Synthetic fixture only'}}));
+      return ws.send(JSON.stringify({req_id:m.req_id,msg_type:'proposal',proposal:{id,ask_price:String(m.amount),payout:String(Math.round(m.amount*1.95*100)/100),spot:100,spot_value:'100.00',date_start:Math.floor(Date.now()/1000),date_expiry:Math.floor(Date.now()/1000)+3,longcode:'Synthetic fixture only'}}));
     }
     if (process.env.STUB_TRADING === '1' && m.buy) {
       if(req.url.includes('public'))return ws.send(JSON.stringify({req_id:m.req_id,error:{code:'AuthorizationRequired',message:'Fixture requires account socket'}}));
-      const proposal=proposals.get(m.buy);const id=++contractIndex;contracts.set(id,proposal);tradeLog.push({...proposal,contract_id:id,price:m.price});
-      return ws.send(JSON.stringify({req_id:m.req_id,msg_type:'buy',buy:{contract_id:id,buy_price:proposal.amount,payout:Math.round(proposal.amount*1.95*100)/100,longcode:'Synthetic fixture only',currency:proposal.currency,start_time:1700000000}}));
+      const proposal=proposals.get(m.buy);const id=++contractIndex;contracts.set(id,proposal);tradeLog.push({...proposal,contract_id:id,price:m.price,account_socket:req.url});
+      return ws.send(JSON.stringify({req_id:m.req_id,msg_type:'buy',buy:{contract_id:id,buy_price:proposal.amount,payout:Math.round(proposal.amount*1.95*100)/100,longcode:'Synthetic fixture only',currency:proposal.currency,start_time:Math.floor(Date.now()/1000)}}));
     }
     if (process.env.STUB_TRADING === '1' && m.proposal_open_contract) {
       const proposal=contracts.get(m.contract_id);const won=m.contract_id>2;const profit=won?Math.round(proposal.amount*.95*100)/100:-proposal.amount;
-      const frame={req_id:m.req_id,msg_type:'proposal_open_contract',subscription:{id:`fixture-contract-${m.contract_id}`},proposal_open_contract:{contract_id:m.contract_id,is_sold:0,status:'open',buy_price:proposal.amount,profit:0,payout:0,currency:proposal.currency}};ws.send(JSON.stringify(frame));
-      setTimeout(()=>{if(ws.readyState!==1)return;fixtureBalance=Math.round((fixtureBalance+profit)*100)/100;ws.send(JSON.stringify({...frame,proposal_open_contract:{...frame.proposal_open_contract,is_sold:1,status:won?'won':'lost',profit,payout:won?Math.round(proposal.amount*1.95*100)/100:0}}));if(balanceReq)ws.send(JSON.stringify({req_id:balanceReq.req_id,subscription:{id:'balance'},balance:{balance:fixtureBalance,currency:'USD'}}));},350);return;
+      const frame={req_id:m.req_id,msg_type:'proposal_open_contract',subscription:{id:`fixture-contract-${m.contract_id}`},proposal_open_contract:{contract_id:m.contract_id,is_sold:0,status:'open',buy_price:String(proposal.amount),profit:'0.00',bid_price:'0.00',payout:String(Math.round(proposal.amount*1.95*100)/100),entry_spot:'100.01',currency:proposal.currency}};ws.send(JSON.stringify(frame));
+      setTimeout(()=>{if(ws.readyState!==1)return;fixtureBalance=Math.round((fixtureBalance+profit)*100)/100;ws.send(JSON.stringify({...frame,proposal_open_contract:{...frame.proposal_open_contract,is_sold:1,status:won?'won':'lost',profit:String(profit),bid_price:String(proposal.amount+profit),exit_spot:'100.08',date_settlement:Math.floor(Date.now()/1000)}}));if(balanceReq)ws.send(JSON.stringify({req_id:balanceReq.req_id,subscription:{id:'balance'},balance:{balance:fixtureBalance,currency:'USD'}}));},Number(process.env.STUB_SETTLE_MS||350));return;
     }
     if (process.env.STUB_TRADING === '1' && m.ticks_history) {
-      const prices=Array.from({length:Math.min(m.count||300,1000)},(_,i)=>100+(m.ticks_history==='R_10'?(i%10===0?2:1):i%10)/100);
-      return ws.send(JSON.stringify({req_id:m.req_id,msg_type:'history',pip_size:2,history:{prices,times:prices.map((_,i)=>1700000000+i)}}));
+      let seed=38231;const randomDigit=()=>{seed=(seed*1664525+1013904223)>>>0;return (seed>>>16)%10;};
+      const prices=Array.from({length:Math.min(m.count||300,5000)},(_,i)=>100+(process.env.STUB_PATTERNS==='1'?(m.ticks_history==='R_10'?(i%2?8:1):randomDigit()):(m.ticks_history==='R_10'?(i%10===0?2:1):i%10))/100);
+      const end=Math.floor(Date.now()/1000);
+      return ws.send(JSON.stringify({req_id:m.req_id,msg_type:'history',pip_size:2,history:{prices,times:prices.map((_,i)=>end-prices.length+i+1)}}));
     }
     if (process.env.STUB_TRADING === '1' && m.active_symbols) return ws.send(JSON.stringify({req_id:m.req_id,msg_type:'active_symbols',active_symbols:[10,25].map((n)=>({underlying_symbol:`R_${n}`,underlying_symbol_name:`Fixture Volatility ${n}`,market:'synthetic_index',submarket:'random_index',exchange_is_open:1,is_trading_suspended:0,pip_size:2,trade_count:1}))}));
     if (m.ticks_history) return ws.send(JSON.stringify({ req_id: m.req_id, msg_type: 'history', pip_size: 2, history: { prices: [1234.50,1234.55,1234.60], times: [1700000000,1700000001,1700000002] } }));
@@ -118,9 +121,9 @@ market.on('connection', (ws, req) => {
     if (m.forget || m.forget_all) {if(m.forget_all){for(const timer of tickTimers.values())clearInterval(timer);tickTimers.clear();}else {clearInterval(tickTimers.get(m.forget));tickTimers.delete(m.forget);}return ws.send(JSON.stringify({req_id:m.req_id,forget:1}));}
     if (m.ticks) {
       const subId = `fixture-ticks-${m.req_id}`;
-      let q = 1234.5;
+      let q = 1234.5,index=0,seed=38231;
       const tickTimer = setInterval(() => {
-        q += 0.5;
+        if(process.env.STUB_PATTERNS==='1'){seed=(seed*1664525+1013904223)>>>0;q=100+(m.ticks==='R_10'?(index++%2?8:1):(seed>>>16)%10)/100;}else q+=.5;
         ws.send(
           JSON.stringify({
             req_id: m.req_id,

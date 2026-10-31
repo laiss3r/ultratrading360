@@ -7,7 +7,7 @@ const f=vi.hoisted(()=>({state:{} as Record<string,unknown>}));
 vi.mock('next/navigation',()=>({useRouter:()=>({push:vi.fn()})}));
 vi.mock('@/state/store',()=>({useApp:Object.assign((select:(state:Record<string,unknown>)=>unknown)=>select(f.state),{getState:()=>f.state})}));
 import OverlordPage from './page';
-beforeEach(()=>{f.state={symbols:[{underlying_symbol:'R_10',underlying_symbol_name:'Fixture Volatility 10',exchange_is_open:1,is_trading_suspended:0}],activeSymbol:'R_10',strategies:[],session:{loginid:'DOT_TEST',currency:'USD',isVirtual:true},botState:'idle',settings:{limits:DEFAULT_RISK_LIMITS},saveStrategy:vi.fn(async(s:Strategy)=>{f.state.strategies=[s];return {ok:true,message:'Saved'};}),setActiveStrategy:vi.fn(),runStrategy:vi.fn(async()=>({ok:false,message:'Trading is disabled.'}))};});
+beforeEach(()=>{f.state={trades:[],executionJournal:[],sessionResets:{},symbols:[{underlying_symbol:'R_10',underlying_symbol_name:'Fixture Volatility 10',exchange_is_open:1,is_trading_suspended:0}],activeSymbol:'R_10',strategies:[],session:{loginid:'DOT_TEST',currency:'USD',isVirtual:true},botState:'idle',settings:{limits:DEFAULT_RISK_LIMITS},saveStrategy:vi.fn(async(s:Strategy)=>{f.state.strategies=[s];return {ok:true,message:'Saved'};}),setActiveStrategy:vi.fn(),runStrategy:vi.fn(async()=>({ok:false,message:'Trading is disabled.'}))};});
 afterEach(cleanup);
 describe('Overlord controls within the approved workspace',()=>{
   it('saves the selected parameters and requires explicit confirmation without enabling trading',async()=>{

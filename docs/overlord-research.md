@@ -1,52 +1,56 @@
-# Overlord Pro: researched implementation
+# Overlord Pro: qualified live signals and execution audit
 
-**1 November 2026, Nairobi.** Target: add the reference behaviour without changing the approved UltraTrading360 shell, navigation, account/security flow or design system.
+**1 November 2026, Nairobi.** Preserves the approved UltraTrading360 design, navigation and genuine account/authentication flow. User decision: **wait for qualified signals on either selected Demo or Real account**. This is not a Demo-only engine. No profitability or accuracy guarantee is made.
 
-## Research
+## Research and rejected claims
 
-Reviewed the supplied Overlord Pro V2.3 screenshots and the public application at https://360tradinghub.co.ke/ . Its Overlord implementation is in https://360tradinghub.co.ke/static/js/async/476.ed653109.js . This is behavioural research, not an endorsement of its trading claims or a copy of its interface.
+Reviewed the supplied Overlord V2.3 screenshots and https://360tradinghub.co.ke/ . Its public bundle at https://360tradinghub.co.ke/static/js/async/476.ed653109.js ranks low historical occurrence and displays `15*Math.random()+80` as confidence. Neither that ordering nor invented confidence is used here. A rare independent outcome is not "due".
 
-The public implementation compares historical outcome frequencies across volatility markets and selects the lowest observed occurrence of the chosen contract. It separates secondary-contract recovery from stake multiplication, offers alternate/switch-on-loss/return-after-recovery modes, and expires a market suggestion. Its confidence display uses `15*Math.random()+80`, rather than a measured forecast. Its expiry code uses 60 seconds even though adjacent copy describes two minutes. We deliberately did **not** reproduce either misleading presentation.
+Deriv's Martingale explanation warns of rapidly increasing losses: https://deriv.com/blog/posts/martingale-strategy-in-deriv-bot . Contract switching and stake escalation do not establish an edge.
 
-Deriv's own Martingale guide discusses starting stake, multiplication, profit/loss thresholds and the rapid increase in risk: [1](https://deriv.com/blog/posts/martingale-strategy-in-deriv-bot). Our cap policy is deliberately stricter than copying a reference bot's stake behaviour: global limits cannot be loosened by a saved setup.
+Execution timing was checked against https://dsmarttrader.deriv.com/trading and the community discussion https://community.deriv.com/t/options-to-trade-on-deriv-reset-call-reset-put-high-tick-low-tick-and-asians/42287 . Rise/Fall use a future entry tick, not the already-observed signal tick. Network/broker latency can still change the eventual entry. The authoritative monetary/spot schemas were reviewed at:
 
-## Behaviour delivered
+- https://developers.deriv.com/schemas/proposal_open_contract_response.schema.json
+- https://developers.deriv.com/schemas/buy_response.schema.json
 
-| Reference feature | UltraTrading360 behaviour |
-| --- | --- |
-| Contract / prediction / market | Eight existing genuine contract types: Even, Odd, Over, Under, Matches, Differs, Rise, Fall. Validates meaningful digit barriers and 1–10-tick duration. RUNHIGH/RUNLOW are not supported or silently substituted. |
-| Find Market | Requests 300 real public historical ticks per selected open volatility market; three concurrent requests, at most 20 markets, cancellation and progress. Rejects insufficient/invalid/unordered history; requires at least 100 ticks. |
-| Ranked result | Lowest observed occurrence first, matching the researched contrarian ordering. Non-overlapping duration-sized samples; actual hit/sample counts, observed frequency, Wilson interval and uniform-digit baseline where relevant. No invented confidence or recommendation of a guaranteed market. |
-| Suggestion expiry | Visible 60-second expiry. Changing contract, duration or prediction invalidates observations. Expired observations cannot be applied from the result table. |
-| Run Bot | Saves a genuine strategy, then opens the existing account confirmation. Neither save nor confirmation bypasses global execution permission, Real acknowledgement, account/socket identity or currency verification. |
-| Recovery contract | Independent toggle and validated secondary contract/prediction. After a nonpositive settlement, return-after-recovery stays on the recovery leg until its first positive settlement, then returns to base. This is **not** a promise that all accumulated losses have been recovered. Switch-on-loss toggles legs after each nonpositive settlement. Alternate changes legs every selected 1–5 settled contracts. |
-| Martingale | Off by default; selected multiplier (2.1 default), bounded escalation steps (1–10), and global stake/exposure enforcement. Positive settlements reset the loss streak. At the configured step limit the progression stops escalating; applicable global risk limits still decide whether another entry is allowed. |
-| Target / stop / entry cap | Per-bot profit target, loss stop and maximum entries intersect with stricter global limits. Immediate post-settlement checks stop further entries when reached. Stops cannot eliminate the loss of an already-purchased contract. |
-| Session / ledger | Existing session monitor and broker-result ledger, plus a compact Overlord session summary using actual risk state. No fabricated trades, balances or P/L. |
+## Delivered workflow
 
-A low historical occurrence does **not** make an independent outcome due. Intervals are descriptive, not next-trade probability or expected profitability. Simultaneously scanning markets also introduces selection bias. Martingale and changing contracts do not create a demonstrated edge.
+1. Choose an actual broker market, contract/prediction, 1–10-tick duration and stake. Eight supported types: Even, Odd, Over, Under, Matches, Differs, Rise, Fall. Unsupported contract names are not silently substituted.
+2. **Find market** starts a cancellable live scan with actual loading progress, status per market, held-out counts, new live outcomes and explicitly labelled evidence bounds. Up to 20 open volatility markets; three history requests concurrently. Market choice is enabled only for a currently qualified result.
+3. **Run bot** saves the configuration and opens account/stake confirmation. A running bot may remain waiting indefinitely. No qualified evidence means no order. Primary and recovery contracts have separate live qualification.
+4. A qualified signal still needs two fresh actual broker proposals, payout-margin checks and final signal/risk/account/currency/permission checks immediately before buy. No automatic retry after uncertain execution.
+5. **Summary / Transactions / Journal** expose pending/accepted/settled lifecycle, broker IDs, current values, entry/exit spots, actual paid stake, gross returns and net P/L. Journal filters/download and account-specific prior sessions are available.
+6. **Stop** blocks future purchases without discarding an accepted contract's settlement. Pending execution locks reset, bot replacement and account switching. Refresh never resumes trading automatically.
+7. **Reset session view** clears displayed totals, not audit history or risk history. Transactions/journal persist locally, scoped to the actual selected account and environment. Journal storage is bounded to 500 events.
 
-## Execution issues corrected during integration
+Recovery and Martingale remain separate optional controls. Return-after-recovery means return after a positive recovery settlement, not proof that cumulative losses were recovered. Switch-on-loss and bounded alternation are supported. Positive settlement resets the escalation streak; zero net is a non-win for progression but not a statistical win/loss. Stricter global risk limits always prevail.
 
-- The provider previously defaulted a verified execution back to one tick and USD. It now carries the actual immutable priced request through a private, single-use context, preserving account currency, duration, contract and barrier.
-- Pricing is verified again, with the approved ask as the maximum. Stop and risk permission are checked again immediately before the final buy, **after** this second proposal.
-- The final risk check excludes its own reserved exposure, avoiding accidental double counting; a definitive pre-buy cancellation releases that reservation without inventing a trade.
-- Orders are sequential through settlement. A pending order prevents replacing the bot or switching its account. Execution/settlement uncertainty halts automation; there is no automatic purchase retry.
-- Settlement processing accepts a terminal first subscription frame, clears its timer and forgets the settled named subscription so it is not replayed on reconnect.
-- The store retains the actual new risk-manager instance used by the bot, rather than showing a previous instance in live controls.
+## Fixed qualification policy
 
-## Evidence
+- Request 5,000 real history ticks; require at least 1,200 valid ordered ticks.
+- Causal binary suffix candidates of length 1–3. Select on training only (at least 100 matching observations), validate chronologically on held-out history (at least 80), then require at least 30 **new live** matching outcomes. Retain the latest 300 matching forward outcomes.
+- Non-overlapping labels, with historical and forward grids aligned. Rise/Fall labels use future entry at `i+1`, exit at `i+duration+1`; digit labels use exit `i+duration`.
+- Require at least 2 percentage points over the relevant baseline. An adjusted Wilson-style lower bound uses z=3.75 (approximate allowance for 14 patterns × 20 markets). Lower bound × actual gross payout / ask − 1 must be at least 0.02.
+- Five-second tick freshness, 15-minute model lifetime. A feed gap greater than 1.5 times the median positive historical interval resets validation; duplicate epoch/price frames are ignored. Stopped or stale scans cannot apply a qualified selection.
 
-- **401 passing tests, 35 files**; typecheck, ESLint, production build and `git diff --check` passed.
-- Added targeted scanner/configuration, recovery rotation, progression/engine, currency/duration, last-moment cancellation, reservation, terminal settlement, subscription replay and UI confirmation/validation tests.
-- **13 synthetic end-to-end browser checks**: the genuine application engine logged in to the explicitly synthetic upstream, enabled Demo permission, scanned, requested confirmation before any buy, then purchased EVEN/OVER/OVER with stakes 1/2.10/4.41 and duration 3. Two fixture losses and one fixture win produced net +1.09; the target halted the bot and no fourth buy occurred. The actual application ledger contained the fixture settlement records. Mobile width 390px: no horizontal page overflow or uncaught browser errors.
-- Separately, a clean build used **real unauthenticated Deriv public history**: the scanner returned **13 volatility market observations**. Mobile width 390px: no horizontal page overflow and zero uncaught browser errors.
-- The clean production browser bundle was checked for local fixture URLs; none were present. Fixtures are opt-in tools, not application fallbacks, and contain no real account credentials.
+**These are conservative engineering gates, not a proven predictive edge.** Dependence, repeated monitoring, market selection, model drift and execution latency limit statistical interpretation. No next-trade accuracy percentage or guaranteed profitability is displayed. Strict gates may produce no trades on genuine random markets; that is intentional, not a reason to manufacture entries.
 
-The synthetic run validates application integration, **not real-money broker acceptance**. No user's live order was placed and no claim is made that the user's previously missing Real account has been resolved by this feature. Interactive consent, the user's actual account permissions and live buys still require independent acceptance testing. Start on Demo.
+## Broker compatibility and accounting corrections
 
-## Operational limits
+- Strict finite numeric parsing accepts decimal strings but does not convert null, empty strings or booleans into zero money. Current `entry_spot` / `exit_spot` and legacy spot aliases are supported. Wrong-contract updates are ignored; cancelled contracts are terminal. Broker settlement timestamps are retained.
+- Actual gross return is paid stake plus finite realized broker profit. Potential payout is never counted as realized return on losses, partial sales or refunds. Zero net is shown separately.
+- Priced immutable requests retain currency, duration, barrier and contract through a single-use execution context. Stop/permission/signal checks run after repricing and again after the buying callback.
+- Independent chart/bot subscription keys and current-ID cleanup prevent a scanner or chart from unsubscribing another consumer. Completed POC subscriptions are forgotten rather than replayed.
+- Selecting genuine Real synchronizes the persisted environment but never silently enables execution. Disabling permission stops new entries while preserving pending settlement; changing Real acknowledgement does not tear down a pending contract socket.
 
-Automation remains browser-local: keep the tab open. Saved settings do not automatically resume trading on reload. Network errors, broker rejection or unknown order outcomes halt rather than fabricate a settlement or retry a buy. Review the broker account before manually restarting after an uncertain outcome. This feature is not a persistent server-side trading service; the Django backend remains undeployed.
+## Verification
 
-Implementation: `src/lib/overlord.ts`, `src/lib/engine/rotation.ts`, `src/app/overlord/page.tsx`, and the existing engine/provider/risk/account-store integration. Reproducible synthetic harness: `tools/overlord-flow.mjs`, with setup in `tools/README.md`. The approved global styles, app shell and authentication API routes were not redesigned.
+- TypeScript, ESLint, full unit suite: **457 passing** including the current-subscription-ID reconnect regression; production build passed.
+- Mobile full-stack browser fixtures: **27 Demo + 27 Real checks passed**. Verified qualification waits, actual chosen socket, decimal-string POC money/current spots, 1 → 2.10 → 4.41 accepted stakes, exact 7.51 paid / 8.60 returned / +1.09 net fixture accounting, target halt, export/account isolation, refresh/reset persistence, and Stop retaining an already-open contract until settlement.
+- Fixture money/results above are **explicitly synthetic test expectations**, not advertised strategy performance. All fixtures are opt-in developer tools; no fixture feeds, simulated trades or fabricated balances are shipped in production.
+- Existing Real-first account regression: **12 synthetic checks passed**, including stale preference, refresh, account switching and mobile overflow.
+- No live authenticated funds/orders were used for these tests. Genuine-account profitability has not been established.
+
+### Reproduce synthetic integration
+
+Build with `NEXT_PUBLIC_DERIV_API_BASE=http://127.0.0.1:4517` and `NEXT_PUBLIC_DERIV_WS_PUBLIC=ws://127.0.0.1:4519`. Start `tools/derivstub.mjs` with `STUB_TRADING=1 STUB_PATTERNS=1 STUB_REAL_FUNDS=1 STUB_SETTLE_MS=1800`. Run Next with the same endpoint environment and an ephemeral test-only session-cookie key, then run `TEST_MODE=demo node tools/overlord-flow.mjs` and `TEST_MODE=real node tools/overlord-flow.mjs`. The script currently imports the sandbox's Playwright installation; adjust that import for another machine. Never deploy a fixture build. Restore a clean normal production build afterward.

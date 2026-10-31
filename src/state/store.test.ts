@@ -65,3 +65,13 @@ describe('incomplete account discovery regression',()=>{
     const fetchMock=setup([demo]);useApp.setState({busy:'switch-account'});expect((await useApp.getState().syncBalances()).ok).toBe(false);expect(fetchMock).not.toHaveBeenCalled();expect(runClassicDiscovery).not.toHaveBeenCalled();
   });
 });
+
+describe('session reset and account mode integrity',()=>{
+ it('blocks resetting or erasing history while an accepted contract is pending',async()=>{
+  useApp.setState({bot:{hasPendingOrder:()=>true} as unknown as import('@/lib/engine/bot').TradingBot,botState:'stopped'});
+  expect((await useApp.getState().resetSessionView()).ok).toBe(false);await expect(useApp.getState().clearTrades()).rejects.toThrow(/settlement/);
+ });
+ it('resets only the session display, never the historical ledger or journal',async()=>{
+  const trade={id:'test'} as import('@/lib/engine/bot').TradeRecord;useApp.setState({trades:[trade],bot:null,botState:'halted',executionJournal:[]});expect((await useApp.getState().resetSessionView()).ok).toBe(true);expect(useApp.getState().trades).toEqual([trade]);expect(useApp.getState().botState).toBe('idle');
+ });
+});

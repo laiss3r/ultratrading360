@@ -1,3 +1,4 @@
+import { brokerNumber, requiredBrokerNumber } from './numbers';
 import { DerivClient, DerivApiError } from './client';
 import { ContractService, type ContractType } from './contracts';
 import type { DerivMessage, OpenContract, Proposal } from './types';
@@ -43,7 +44,7 @@ export class TradingService {
 
   async buy(
     req: BuyRequest,
-    opts: { authorized: boolean; maxAcceptablePrice?: number; minAcceptablePayout?: number; shouldExecute?: () => boolean },
+    opts: { authorized: boolean; maxAcceptablePrice?: number; minAcceptablePayout?: number; shouldExecute?: (proposal:Proposal) => boolean; onBuying?: () => void },
   ): Promise<ExecutedTrade> {
     if (!opts.authorized) {
       throw new Error('REFUSED: buy() requires an explicit authorization from the risk manager.');
@@ -74,8 +75,10 @@ export class TradingService {
       );
     }
 
-    if (opts.shouldExecute && !opts.shouldExecute()) throw new OrderCancelledError();
+    if (opts.shouldExecute && !opts.shouldExecute(proposal)) throw new OrderCancelledError();
 
+    opts.onBuying?.();
+    if (opts.shouldExecute && !opts.shouldExecute(proposal)) throw new OrderCancelledError();
     // 3. Buy by proposal id.
     let res: { buy: { buy_price: number; contract_id: number; payout: number; longcode: string; currency: string; start_time?: number; purchase_time?: number } };
     try {
@@ -87,13 +90,14 @@ export class TradingService {
       throw e;
     }
     const b = res.buy;
+    const buyPrice=requiredBrokerNumber(b.buy_price,'executed buy price'),payout=requiredBrokerNumber(b.payout,'potential payout');
     return {
       contractId: b.contract_id,
       proposalId: proposal.id,
-      buyPrice: b.buy_price,
-      payout: b.payout,
+      buyPrice,
+      payout,
       longcode: b.longcode,
-      currency: b.currency,
+      currency: b.currency??req.currency,
       dateStart: b.start_time ?? b.purchase_time ?? Math.floor(Date.now() / 1000),
       dateExpiry: proposal.date_expiry,
       verifiedProposal: proposal,
@@ -106,14 +110,18 @@ export class TradingService {
       let settled = false;
       let subId: string | null = null;
       const timeout = setTimeout(() => {
-        if (!settled) { settled = true; reject(new Error(`Timed out waiting for contract ${contractId} to settle.`)); }
+        if (!settled) { settled = true; if(subId)void this.client.forget(subId,`poc_${contractId}`); reject(new Error(`Timed out waiting for contract ${contractId} to settle.`)); }
       }, 10 * 60 * 1000);
       const handle = (m: DerivMessage) => {
         if (settled) return;
-        const c = m.proposal_open_contract as OpenContract | undefined;
-        if (!c) return;
+        const raw = m.proposal_open_contract as Record<string,unknown> | undefined;
+        if (!raw || brokerNumber(raw.contract_id)!==contractId) return;
+        // Current Options API uses decimal strings and entry_spot/exit_spot.
+        // Keep legacy aliases for classic-compatible responses, never infer zero.
+        const c={...raw,contract_id:contractId,buy_price:brokerNumber(raw.buy_price),payout:brokerNumber(raw.payout),profit:brokerNumber(raw.profit),bid_price:brokerNumber(raw.bid_price),current_spot:brokerNumber(raw.current_spot),entry_tick:brokerNumber(raw.entry_spot)??brokerNumber(raw.entry_tick),exit_tick:brokerNumber(raw.exit_spot)??brokerNumber(raw.exit_tick),date_settlement:brokerNumber(raw.date_settlement),is_sold:brokerNumber(raw.is_sold)} as OpenContract;
+
         onUpdate?.(c);
-        if (c.is_sold === 1 || ['sold','won','lost'].includes(c.status)) {
+        if (c.is_sold === 1 || ['sold','won','lost','cancelled'].includes(c.status)) {
           settled = true; clearTimeout(timeout);
           if (subId) void this.client.forget(subId, `poc_${contractId}`);
           resolve(c);

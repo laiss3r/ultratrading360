@@ -1,4 +1,5 @@
-import { get, set, del, keys } from 'idb-keyval';
+import type { ExecutionEvent } from '../engine/execution';
+import { get, set, del, keys, update } from 'idb-keyval';
 import type { Strategy } from '../engine/strategies';
 import type { TradeRecord } from '../engine/bot';
 import type { RiskLimits, RecoveryConfig } from '../engine/risk';
@@ -131,4 +132,21 @@ export async function loadSettings(): Promise<AppSettings> {
 export async function saveSettings(s: AppSettings): Promise<void> {
   if (!(await available())) return;
   await set(PREFIX.settings + 'app', s);
+}
+
+
+export async function loadExecutionJournal():Promise<ExecutionEvent[]>{
+  if(!(await available()))return [];
+  return (await get<ExecutionEvent[]>('execution:journal'))??[];
+}
+export async function appendExecutionEvent(event:ExecutionEvent):Promise<void>{
+  if(!(await available()))return;
+  await update<ExecutionEvent[]>('execution:journal',(old)=>[event,...(old??[])].slice(0,500));
+}
+export async function loadSessionResets():Promise<Record<string,number>>{
+  if(!(await available()))return {};
+  return (await get<Record<string,number>>('execution:resets'))??{};
+}
+export async function saveSessionResets(resets:Record<string,number>):Promise<void>{
+  if(await available())await set('execution:resets',resets);
 }

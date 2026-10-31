@@ -146,3 +146,9 @@ describe('breakdown by market, strategy and contract type', () => {
     expect(trades.map((t) => t.mode)).toEqual(['deriv_demo', 'deriv_real']);
   });
 });
+
+
+it('counts actual partial gross returns on losing sold contracts and separates zero-net settlements',()=>{
+ const m=computeMetrics([tr({won:false,stake:1,payout:.5,profit:-.5}),tr({won:false,stake:1,payout:1,profit:0})]);
+ expect(m.totalPayout).toBe(1.5);expect(m.netProfit).toBe(-.5);expect(m.losses).toBe(1);expect(m.wins).toBe(0);expect(m.settledCount).toBe(2);
+});

@@ -36,6 +36,8 @@ export interface Strategy {
    */
   progression?: ProgressionConfig;
   contractRotation?: ContractRotation;
+  /** Versioned live-pattern qualification, mandatory for Overlord-created setups. */
+  signalGate?: { version: 1 };
   notes?: string;
 }
 
@@ -70,6 +72,7 @@ export function createStrategy(partial: Partial<Strategy> = {}): Strategy {
     recovery: { ...DEFAULT_RECOVERY, ...(partial.recovery ?? {}) },
     progression: partial.progression,
     contractRotation: partial.contractRotation,
+    signalGate: partial.signalGate,
     notes: partial.notes,
   };
 }
@@ -83,6 +86,7 @@ export interface StrategyValidation {
 export function validateStrategy(s: Strategy): StrategyValidation {
   const errors: string[] = [];
   const warnings: string[] = [];
+  if((s.signalGate||s.name.startsWith('Overlord ·')) && ((s.signalGate&&s.signalGate.version!==1) || s.durationUnit!=='t' || s.duration>10)) errors.push('Signal-gated strategies require policy v1 and 1–10 tick duration.');
 
   if (!s.name.trim()) errors.push('Strategy needs a name.');
   if (!s.market.trim()) errors.push('Strategy needs a market symbol.');

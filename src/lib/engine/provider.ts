@@ -4,6 +4,7 @@ import { MarketDataService } from '../deriv/market';
 import { ContractService, type ContractType } from '../deriv/contracts';
 import { TradingService, type BuyRequest } from '../deriv/trading';
 import { lastDigit } from '../deriv/digits';
+import type { ContractUpdate } from './execution';
 
 export interface Quote {
   symbol: string;
@@ -27,6 +28,9 @@ export interface PricedContract {
 
 export interface SettledContract {
   won: boolean;
+  contractId?: number;
+  openedAt?: number;
+  closedAt?: number;
   stake: number;
   payout: number;
   profit: number;
@@ -66,7 +70,8 @@ export interface ExecuteOptions {
   /** True only when the socket is authorized for the account being traded. */
   authorized: boolean;
   /** Rechecked immediately before buy, after the broker reprices. */
-  shouldExecute?: () => boolean;
+  shouldExecute?: (quote?: {askPrice:number;payout:number}) => boolean;
+  onUpdate?: (update:ContractUpdate) => void;
 }
 
 export interface MarketProvider {
@@ -219,13 +224,18 @@ export class DerivProvider implements MarketProvider {
       stake: priced.stake, currency: context.currency,
       duration: context.duration, durationUnit: context.durationUnit, barrier: context.barrier,
     };
-    const trade = await this.tradingSvc.buy(req, { authorized: opts.authorized, maxAcceptablePrice: priced.askPrice, shouldExecute: opts.shouldExecute });
-    const settled = await this.tradingSvc.watchContract(trade.contractId);
-    const profit = Number(settled.profit ?? (settled.is_sold === 1 ? Number(settled.payout) - trade.buyPrice : 0));
+    const trade = await this.tradingSvc.buy(req, { authorized: opts.authorized, maxAcceptablePrice: priced.askPrice, shouldExecute: (proposal) => opts.shouldExecute?.({askPrice:proposal.ask_price,payout:proposal.payout}) ?? true, onBuying: () => opts.onUpdate?.({phase:'buying'}) });
+    opts.onUpdate?.({phase:'open',contractId:trade.contractId,stake:trade.buyPrice,potentialPayout:trade.payout});
+    const settled = await this.tradingSvc.watchContract(trade.contractId,(c)=>opts.onUpdate?.({phase:'open',contractId:trade.contractId,entryPrice:c.entry_tick,exitPrice:c.exit_tick,currentSpot:c.current_spot,contractValue:c.bid_price,profit:c.profit}));
+    if(!Number.isFinite(settled.profit))throw new Error('Broker settlement has no finite profit; reconcile this contract before restarting.');
+    const profit=Number(settled.profit);
     return {
       won: profit > 0,
+      contractId: trade.contractId,
+      openedAt: trade.dateStart*1000,
+      closedAt: settled.date_settlement?settled.date_settlement*1000:Date.now(),
       stake: trade.buyPrice,
-      payout: Number(settled.payout ?? trade.payout),
+      payout: round2(Math.max(0,trade.buyPrice+profit)),
       profit: round2(profit),
       entryPrice: settled.entry_tick,
       exitPrice: settled.exit_tick,

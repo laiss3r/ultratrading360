@@ -1,3 +1,6 @@
+import { PatternTracker, SIGNAL_POLICY, payoutCheck, type SignalEvidence } from '../signals/patterns';
+import type { ExecutionEvent, ExecutionPhase } from './execution';
+import type { ContractLeg } from './rotation';
 import type { MarketProvider, Quote, SettledContract } from './provider';
 import type { AccountMode } from '../deriv/types';
 import { evaluateGroup, type DigitWindow } from './conditions';
@@ -12,6 +15,13 @@ export type BotState = 'idle' | 'starting' | 'running' | 'paused' | 'stopping' |
 
 export interface TradeRecord {
   id: string;
+  runId?: string;
+  accountLoginid?: string;
+  currency?: string;
+  duration?: number;
+  durationUnit?: string;
+  contractId?: number;
+  signalEvidence?: SignalEvidence;
   /** Idempotency key: strategyId + version + monotonic trade index. */
   idempotencyKey: string;
   strategyId: string;
@@ -41,6 +51,8 @@ export interface TradeRecord {
 }
 
 export interface BotEvents {
+  onSignal?: (e:SignalEvidence) => void;
+  onExecution?: (e:ExecutionEvent) => void;
   onStateChange?: (s: BotState, detail?: string) => void;
   onQuote?: (q: Quote) => void;
   onTrade?: (t: TradeRecord) => void;
@@ -76,6 +88,18 @@ export class TradingBot {
   private balance: number;
   private startingBalance: number;
   private detail = '';
+  private trackers=new Map<string,PatternTracker>();
+  private signalEnabled=false;
+  private execution:ExecutionEvent|null=null;
+  private eventIndex=0;
+  readonly runId=`run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,8)}`;
+  private legKey(leg:ContractLeg){return `${leg.contractType}:${leg.barrier??''}`;}
+  private emit(phase:ExecutionPhase,detail:string,patch:Partial<ExecutionEvent>={}){
+    const event:ExecutionEvent={...(this.execution??{}),id:`${this.runId}:${++this.eventIndex}`,runId:this.runId,at:Date.now(),phase,detail,accountLoginid:this.context.accountLoginid,mode:this.provider.mode,currency:this.strategy.currency,symbol:this.strategy.market,contractType:this.execution?.contractType??this.strategy.contractType,duration:this.strategy.duration,durationUnit:this.strategy.durationUnit,...patch};
+    this.execution=event;this.events.onExecution?.(event);
+  }
+  getExecution(){return this.execution;}
+
 
   constructor(
     public strategy: Strategy,
@@ -83,6 +107,7 @@ export class TradingBot {
     public risk: RiskManager,
     private events: BotEvents = {},
     startingBalance = 10000,
+    private context: {accountLoginid?:string} = {},
   ) {
     this.balance = startingBalance;
     this.startingBalance = startingBalance;
@@ -92,6 +117,7 @@ export class TradingBot {
     this.state = s;
     this.detail = detail;
     this.events.onStateChange?.(s, detail);
+    if(s==='halted'||s==='error')this.emit(s,detail);
   }
 
   getState(): { state: BotState; detail: string } {
@@ -130,21 +156,30 @@ export class TradingBot {
     if (this.state === 'running') return; // single-flight: a second start() is a no-op
     if (this.inFlight) await this.inFlight.catch(() => undefined);
 
+    this.signalEnabled=!!this.strategy.signalGate || this.strategy.name.startsWith('Overlord ·');
     this.setState('starting');
+    this.emit('preparing','Loading broker history and live subscriptions.');
     try {
       if (!this.provider.isConnected()) await this.provider.connect();
-      const hist = await this.provider.history(this.strategy.market, historySize);
+      const hist = await this.provider.history(this.strategy.market, this.signalEnabled?SIGNAL_POLICY.historySize:historySize);
+      if(this.state!=='starting')return;
       this.digits = hist.map((q) => q.digit);
       this.prices = hist.map((q) => q.price);
       this.pipSize = hist[0]?.pipSize ?? 2;
       this.risk.setEquity(this.balance);
+      this.trackers.clear();
+      if(this.signalEnabled){for(const leg of [this.strategy,...(this.strategy.contractRotation?[this.strategy.contractRotation.recovery]:[])])this.trackers.set(this.legKey(leg),new PatternTracker(this.strategy.market,leg,this.strategy.duration,hist));}
+      if(this.state!=='starting')return;
+
 
       const dispose = await this.provider.stream(this.strategy.market, (q) => {
         this.events.onQuote?.(q);
-        if (q.symbol !== this.strategy.market || this.state !== 'running') return;
+        if(q.symbol===this.strategy.market)for(const tracker of this.trackers.values())tracker.ingest(q);
+        if (q.symbol !== this.strategy.market || !['running','paused'].includes(this.state)) return;
         this.digits.push(q.digit); if (this.digits.length > 5000) this.digits.shift();
         this.prices.push(q.price); if (this.prices.length > 5000) this.prices.shift();
         this.pipSize = q.pipSize;
+        if(this.state!=='running')return;
         // Exactly one quote -> proposal -> buy -> settlement chain at a time.
         if (this.inFlight) return;
         this.inFlight = Promise.resolve().then(() => this.handleQuote(q)).catch((e) => {
@@ -153,8 +188,10 @@ export class TradingBot {
           this.teardownStream();
         }).finally(() => { this.inFlight = null; });
       });
+      if(this.state!=='starting'){dispose();return;}
       this.stopDisposer = dispose;
       this.setState('running');
+      this.emit('waiting',this.signalEnabled?'Waiting for qualified live patterns; no order submitted.':'Waiting for the configured entry conditions.');
     } catch (e) {
       this.setState('error', (e as Error).message);
       this.events.onError?.(e as Error);
@@ -173,6 +210,7 @@ export class TradingBot {
   /** Stop is synchronous and idempotent: after it returns, no further order can be submitted. */
   stop(reason = 'stopped by user') {
     if (this.state === 'stopped') return;
+    this.emit(this.inFlight?'stopping':'stopped',this.inFlight?'Stop requested: no further entries; an accepted contract may still settle.':reason);
     this.setState('stopping');
     this.teardownStream();
     this.setState('stopped', reason);
@@ -208,8 +246,21 @@ export class TradingBot {
       return;
     }
 
+    const leg = nextContract(this.strategy, this.strategy.contractRotation, this.trades.filter((t) => !t.error));
+    const tracker=this.trackers.get(this.legKey(leg));
+    const evidence=tracker?.snapshot(now);
+    if(evidence){
+      this.events.onSignal?.(evidence);
+      if(evidence.status!=='qualified'){
+        this.events.onGate?.(false,[evidence.reason]);
+        if(this.execution?.phase!=='waiting'||now-this.execution.at>=10000)this.emit('waiting',evidence.reason,{contractType:leg.contractType,barrier:leg.barrier});
+        return;
+      }
+    }
+    if(evidence)this.emit('qualified',`Suffix ${evidence.pattern} passes held-out and new live checks; payout still unverified.`,{contractType:leg.contractType,barrier:leg.barrier});
     const window: DigitWindow = { digits: this.digits, prices: this.prices, symbol: q.symbol, pipSize: this.pipSize };
     const gate = evaluateGroup(this.strategy.entry, window);
+    if(evidence)gate.reasons.push(`Qualified suffix ${evidence.pattern}; held-out ${evidence.validation.hits}/${evidence.validation.total}; new live ${evidence.forward.hits}/${evidence.forward.total}.`);
     this.events.onGate?.(gate.satisfied, gate.reasons);
     if (!gate.satisfied) return;
 
@@ -249,10 +300,10 @@ export class TradingBot {
     const index = this.tradeIndex++;
     const balanceBefore = this.balance;
 
-    const leg = nextContract(this.strategy, this.strategy.contractRotation, this.trades.filter((t) => !t.error));
     let reservedStake = 0;
     let record: TradeRecord;
     try {
+      this.emit('pricing','Requesting a fresh broker proposal.',{contractType:leg.contractType,barrier:leg.barrier,stake:decision.stake,contractId:undefined,entryPrice:undefined,exitPrice:undefined,contractValue:undefined,profit:undefined});
       const priced = await this.provider.price({
         symbol: this.strategy.market,
         contractType: leg.contractType,
@@ -270,14 +321,26 @@ export class TradingBot {
         if (finalRisk.halt) { this.setState('halted', finalRisk.reasons.join(' ')); this.teardownStream(); }
         return;
       }
+      if(evidence){const check=payoutCheck(evidence,priced.askPrice,priced.payout);if(!check.allowed){this.emit('waiting',check.reason);return;}}
       this.risk.openExposure(priced.stake);
       reservedStake = priced.stake;
-      const settled: SettledContract = await this.provider.execute(priced, { authorized: true, shouldExecute: () => { const d = this.risk.evaluateReserved(priced.stake, mode); return this.state === 'running' && d.allowed && Math.abs(d.stake - priced.stake) < 1e-8; } });
-      this.risk.closeExposure(priced.stake, settled.profit);
+      const settled: SettledContract = await this.provider.execute(priced, {
+        authorized: true,
+        shouldExecute: (fresh) => {
+          const d=this.risk.evaluateReserved(priced.stake,mode);
+          const current=tracker?.snapshot();
+          return this.state==='running' && d.allowed && Math.abs(d.stake-priced.stake)<1e-8 &&
+            (!evidence || (!!current && current.revision===evidence.revision && payoutCheck(current,fresh?.askPrice??priced.askPrice,fresh?.payout??priced.payout).allowed));
+        },
+        onUpdate:(u)=>this.emit(u.phase,u.phase==='buying'?'Submitting the verified proposal.':'Broker confirmed contract; waiting for its settlement.',{...Object.fromEntries(Object.entries(u).filter(([,v])=>v!==undefined)),contractType:leg.contractType,barrier:leg.barrier}),
+      });
+      if(settled.stake<priced.stake)this.risk.releaseReservation(priced.stake-settled.stake);
+      this.risk.closeExposure(Math.min(priced.stake,settled.stake), settled.profit);
       this.balance = round2(this.balance + settled.profit);
       this.risk.setEquity(this.balance);
 
       record = {
+        runId:this.runId,accountLoginid:this.context.accountLoginid,currency:this.strategy.currency,duration:this.strategy.duration,durationUnit:this.strategy.durationUnit,contractId:settled.contractId,signalEvidence:evidence,
         id: `tr_${Date.now().toString(36)}_${index}`,
         idempotencyKey: `${this.strategy.id}:${this.strategy.version}:${index}`,
         strategyId: this.strategy.id,
@@ -286,12 +349,12 @@ export class TradingBot {
         symbol: this.strategy.market,
         contractType: leg.contractType,
         barrier: priced.barrier,
-        stake: priced.stake,
+        stake: settled.stake,
         payout: settled.payout,
         profit: settled.profit,
         won: settled.won,
-        openedAt: now,
-        closedAt: Date.now(),
+        openedAt: settled.openedAt??now,
+        closedAt: settled.closedAt??Date.now(),
         entryDigit: settled.entryDigit,
         exitDigit: settled.exitDigit,
         entryPrice: settled.entryPrice,
@@ -304,9 +367,10 @@ export class TradingBot {
         gateReasons: gate.reasons,
       };
     } catch (e) {
-      if (e instanceof OrderCancelledError) { this.risk.releaseReservation(reservedStake); return; }
+      if (e instanceof OrderCancelledError) { this.risk.releaseReservation(reservedStake); this.emit(this.state==='running'?'waiting':'stopped','Entry cancelled before buy: Stop, risk, payout or signal freshness changed.'); return; }
       const msg = (e as Error).message;
       record = {
+        runId:this.runId,accountLoginid:this.context.accountLoginid,currency:this.strategy.currency,duration:this.strategy.duration,durationUnit:this.strategy.durationUnit,contractId:this.execution?.contractId,
         id: `tr_err_${Date.now().toString(36)}_${index}`,
         idempotencyKey: `${this.strategy.id}:${this.strategy.version}:${index}`,
         strategyId: this.strategy.id,
@@ -340,6 +404,7 @@ export class TradingBot {
     this.executedKeys.add(record.idempotencyKey);
     this.trades.push(record);
     this.events.onTrade?.(record);
+    if(!record.error)this.emit('settled',`Contract settled: ${record.profit>0?'win':record.profit<0?'loss':'zero net'} ${record.profit.toFixed(2)} ${this.strategy.currency}.`,{contractType:leg.contractType,stake:record.stake,contractId:record.contractId,entryPrice:record.entryPrice,exitPrice:record.exitPrice,profit:record.profit,contractValue:record.payout});
 
     if (this.state === 'running' && this.trades.filter((t) => !t.error).length >= this.strategy.maxTrades) {
       this.setState('halted', `maxTrades (${this.strategy.maxTrades}) reached`);
