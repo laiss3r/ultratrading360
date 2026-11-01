@@ -1,13 +1,10 @@
-import { selectSessionAccount } from '@/lib/deriv/accountSelection';
 import { NextResponse } from 'next/server';
 import { classifyRevalidation } from '@/lib/deriv/auth';
 import { cookies } from 'next/headers';
 import {
   decryptSession,
-  encryptSession,
   publicSession,
   SESSION_COOKIE,
-  sessionExpirySeconds,
   type StoredSession,
 } from '@/lib/oauth/session';
 import { validateAccountsForToken } from '@/lib/deriv/auth';
@@ -16,8 +13,9 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 export const revalidate = 0;
 
-function cookieOptions(maxAge: number) {
-  return { httpOnly: true, secure: true, sameSite: 'lax' as const, path: '/', maxAge };
+function snapshot(session: StoredSession) {
+  return { authenticated: true, session: publicSession(session), preferReal: session.initialRealAccountPending === true,
+    accounts: (session.accountRows ?? []).map((a) => ({loginid:a.account_loginid,currency:a.currency,balance:Number(a.balance??0),isVirtual:a.is_virtual===1})) };
 }
 
 /**
@@ -34,19 +32,17 @@ export async function GET(req: Request) {
   if (!session) {
     // Tampered, corrupt, or encrypted under a previous DERIV_SESSION_SECRET.
     const res = NextResponse.json({ authenticated: false, session: null, reason: 'session_unreadable' });
-    res.cookies.set(SESSION_COOKIE, '', { path: '/', maxAge: 0 });
     return res;
   }
 
   if (session.expiresAt && session.expiresAt < Date.now()) {
     const res = NextResponse.json({ authenticated: false, session: null, reason: 'expired' });
-    res.cookies.set(SESSION_COOKIE, '', { path: '/', maxAge: 0 });
     return res;
   }
 
   const refresh = new URL(req.url).searchParams.get('refresh') === '1';
   if (!refresh) {
-    return NextResponse.json({ authenticated: true, session: publicSession(session) });
+    return NextResponse.json(snapshot(session));
   }
 
   try {
@@ -61,9 +57,7 @@ export async function GET(req: Request) {
         // that was the mobile navigation/logout loop. Transient keeps the session but
         // flags it stale so the client retries in the background.
         return NextResponse.json({
-          authenticated: true,
-          session: publicSession(session),
-          accounts: [],
+          ...snapshot(session),
           stale: verdict === 'transient',
         });
       }
@@ -72,10 +66,8 @@ export async function GET(req: Request) {
     const merged = new Map((session.accountRows ?? []).map((a) => [a.account_loginid, a]));
     for (const account of accounts) merged.set(account.account_loginid, account);
     const rows = [...merged.values()];
-    const current = session.initialRealAccountPending
-      ? selectSessionAccount(session, rows)
-      : rows.find((a) => a.account_loginid === session.loginid);
-    if (!current) return NextResponse.json({ authenticated: true, session: publicSession(session), stale: true });
+    const current = rows.find((a) => a.account_loginid === session.loginid);
+    if (!current) return NextResponse.json({...snapshot({...session,accountRows:rows}),stale:true});
     const updated: StoredSession = {
       ...session,
       loginid: current.account_loginid,
@@ -86,9 +78,8 @@ export async function GET(req: Request) {
       isVirtual: current.is_virtual === 1,
       needsOptionsAccount: undefined,
     };
-    const res = NextResponse.json({ authenticated: true, session: publicSession(updated) });
-    res.cookies.set(SESSION_COOKIE, encryptSession(updated), cookieOptions(sessionExpirySeconds(updated)));
-    return res;
+    // GET is read-only. Only explicit serialized identity mutations set cookies.
+    return NextResponse.json(snapshot(updated));
   } catch (e) {
     return NextResponse.json(
       {

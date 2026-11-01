@@ -1,7 +1,8 @@
 import { parseClassicBalances, type BalanceUpdate } from './classicBalances';
+import { identityRevision, sessionWrite } from './sessionWrites';
 import { DERIV_APP_ID } from './config';
 import { accountsFromAuthorizePayload, scopesFromAuthorizePayload } from './authorizeMap';
-import type { AccountInfo, AuthorizeResult } from './types';
+import type { AccountInfo, AuthorizeResult, AuthSession } from './types';
 
 /**
  * Browser-side classic account discovery: the one call every Deriv client makes
@@ -112,7 +113,9 @@ export async function runClassicDiscovery(): Promise<{
   ok: boolean;
   accounts: Array<{ loginid: string; currency: string; balance: number; isVirtual: boolean }>;
   message: string;
+  session?: AuthSession;
 }> {
+  const revision = identityRevision();
   const none = { ok: false, accounts: [] as Array<{ loginid: string; currency: string; balance: number; isVirtual: boolean }>, message: '' };
   try {
     const h = await fetch('/api/deriv/handoff', { method: 'POST', credentials: 'same-origin' });
@@ -125,7 +128,9 @@ export async function runClassicDiscovery(): Promise<{
     if (!disc || disc.accounts.length === 0) {
       return { ...none, message: 'Deriv’s legacy socket returned no accounts from this network.' };
     }
-    const ad = await fetch('/api/deriv/accounts/adopt', {
+    const ad = await sessionWrite(async () => {
+      if(revision!==identityRevision())throw new Error('Account selection changed; stale discovery discarded.');
+      return fetch('/api/deriv/accounts/adopt', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
@@ -139,9 +144,10 @@ export async function runClassicDiscovery(): Promise<{
         scopes: disc.scopes,
       }),
     });
+    });
     if (!ad.ok) return { ...none, message: `Adopt failed (HTTP ${ad.status}).` };
-    const aj = (await ad.json()) as { accounts?: typeof none.accounts };
-    return { ok: true, accounts: aj.accounts ?? [], message: 'Accounts synced from Deriv.' };
+    const aj = (await ad.json()) as { accounts?: typeof none.accounts; session?: AuthSession };
+    return { ok: true, accounts: aj.accounts ?? [], session: aj.session, message: 'Accounts synced from Deriv.' };
   } catch (e) {
     return { ...none, message: (e as Error).message };
   }

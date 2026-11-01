@@ -32,6 +32,8 @@ export const VERIFIER_COOKIE = 'ut_oauth_verifier';
 export interface StoredSession extends AuthSession {
   /** Fresh login only: select Real if later discovery returns it. Manual selection clears this. */
   initialRealAccountPending?: boolean;
+  /** Binds idempotent OAuth recovery to this completed attempt, never an old login. */
+  authAttemptId?: string;
   /** The credential itself. Never serialised to the client. */
   accessToken: string;
 }

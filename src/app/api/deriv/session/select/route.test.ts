@@ -23,7 +23,7 @@ describe('server-backed real account selection', () => {
   });
   it('refuses a revoked token rather than selecting cached metadata', async () => {
     edge.validate.mockRejectedValue(Object.assign(new Error('revoked'), { code: 'invalid_token' }));
-    expect((await POST(request('DOT1'))).status).toBe(401);
+    expect((await POST(request('ROT1'))).status).toBe(401);
   });
   it('can select an existing display row during an upstream outage', async () => {
     edge.validate.mockRejectedValue(Object.assign(new Error('offline'), { code: 'network' }));
@@ -36,4 +36,10 @@ it('an explicit Demo choice cancels pending initial Real preference', async () =
   const response=await POST(request('DOT1'));
   const saved=decryptSession(response.cookies.get(SESSION_COOKIE)!.value)!;
   expect(saved.loginid).toBe('DOT1');expect(saved.initialRealAccountPending).toBe(false);
+});
+
+it('switches a known Real row without waiting for upstream listings',async()=>{
+ edge.cookie=encryptSession({...session,accountRows:[demo,real]});
+ edge.validate.mockImplementation(()=>new Promise(()=>{}));
+ const response=await POST(request('ROT1'));expect((await response.json()).session.loginid).toBe('ROT1');expect(edge.validate).not.toHaveBeenCalled();
 });

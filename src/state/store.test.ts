@@ -17,7 +17,7 @@ describe('shared identity and execution boundary',()=>{
     useApp.setState({applyMode,refreshSession,settings:{...DEFAULT_SETTINGS,realTradingAcknowledged:true,acknowledgedAccountLoginid:'ROT1'}});
     vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify({ok:true,session:{...real,isVirtual},accounts:[]}))));
     const result=await useApp.getState().connectWithPat('synthetic-token-only');
-    expect(result.ok).toBe(true);expect(applyMode).toHaveBeenCalledWith(isVirtual?'deriv_demo':'deriv_real',false);
+    expect(result.ok).toBe(!isVirtual);expect(applyMode).toHaveBeenCalledWith(isVirtual?'deriv_demo':'deriv_real',false);
     expect(useApp.getState().settings.realTradingAcknowledged).toBe(false);expect(useApp.getState().settings.acknowledgedAccountLoginid).toBeNull();
   });
   it.each([null,'ANOTHER_ACCOUNT'])('never executes from a public or mismatched trading channel (%s)',async(tradingLoginid)=>{
@@ -105,4 +105,19 @@ it('does not delay account initialization behind market ranking',async()=>{
  const rankMarkets=vi.fn(()=>new Promise<void>(()=>{}));
  useApp.setState({provider,rankMarkets});
  await useApp.getState().loadSymbols();expect(rankMarkets).toHaveBeenCalledOnce();
+});
+
+it('discards a delayed Demo refresh after the dropdown has selected Real',async()=>{
+ const demo={...real,loginid:'DOT1',isVirtual:true};let release!:(r:Response)=>void;
+ useApp.setState({session:demo,accounts:[{...demo},{...real}],bot:null,botState:'idle',busy:null,applyMode:vi.fn(async()=>{})});
+ vi.stubGlobal('fetch',vi.fn((url:string)=>url.includes('session/select')?Promise.resolve(new Response(JSON.stringify({ok:true,session:real,accounts:[demo,real]}))):new Promise<Response>((resolve)=>{release=resolve;})));
+ const refresh=useApp.getState().refreshSession(false);
+ expect((await useApp.getState().selectAccount(real.loginid)).ok).toBe(true);
+ release(new Response(JSON.stringify({authenticated:true,session:demo,accounts:[demo]})));await refresh;
+ expect(useApp.getState().session?.loginid).toBe(real.loginid);expect(useApp.getState().accounts).toHaveLength(2);
+});
+it('finishes authentication without waiting for market/socket initialization',async()=>{
+ const applyMode=vi.fn(()=>new Promise<void>(()=>{}));useApp.setState({applyMode});
+ const result=await useApp.getState().finishAuthentication({session:real,accounts:[real]});
+ expect(result.ok).toBe(true);expect(useApp.getState().session?.loginid).toBe(real.loginid);expect(applyMode).toHaveBeenCalledWith('deriv_real',false);
 });

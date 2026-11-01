@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { decryptSession, encryptSession, SESSION_COOKIE, sessionExpirySeconds } from '@/lib/oauth/session';
+import { decryptSession, SESSION_COOKIE } from '@/lib/oauth/session';
 import { DerivAuthError, validateAccountsForToken } from '@/lib/deriv/auth';
 
 export const dynamic = 'force-dynamic';
@@ -66,7 +66,7 @@ export async function GET(req: Request) {
         accountType: a.account_type ?? null,
       })),
     });
-    response.cookies.set(SESSION_COOKIE, encryptSession(updated), { httpOnly: true, secure: true, sameSite: 'lax', path: '/', maxAge: sessionExpirySeconds(updated) });
+    // Read-only: a slow listing must never overwrite a newer selected-account cookie.
     return response;
   } catch (e) {
     const err = e as DerivAuthError;

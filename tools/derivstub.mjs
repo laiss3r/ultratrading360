@@ -116,7 +116,7 @@ market.on('connection', (ws, req) => {
       return ws.send(JSON.stringify({req_id:m.req_id,msg_type:'history',pip_size:2,history:{prices,times:prices.map((_,i)=>end-prices.length+i+1)}}));
     }
     if (process.env.STUB_TRADING === '1' && m.active_symbols) return ws.send(JSON.stringify({req_id:m.req_id,msg_type:'active_symbols',active_symbols:[10,25].map((n)=>({underlying_symbol:`R_${n}`,underlying_symbol_name:`Fixture Volatility ${n}`,market:'synthetic_index',submarket:'random_index',exchange_is_open:1,is_trading_suspended:0,pip_size:2,trade_count:1}))}));
-    if (m.ticks_history) return ws.send(JSON.stringify({ req_id: m.req_id, msg_type: 'history', pip_size: 2, history: { prices: [1234.50,1234.55,1234.60], times: [1700000000,1700000001,1700000002] } }));
+    if (m.ticks_history) {const reply=()=>{if(ws.readyState===1)ws.send(JSON.stringify({ req_id: m.req_id, msg_type: 'history', pip_size: 2, history: { prices: [1234.50,1234.55,1234.60], times: [1700000000,1700000001,1700000002] } }));};if(process.env.STUB_HISTORY_DELAY_MS)setTimeout(reply,Number(process.env.STUB_HISTORY_DELAY_MS));else reply();return;}
     if (m.active_symbols) return ws.send(JSON.stringify({req_id:m.req_id,msg_type:'active_symbols',active_symbols:[]}));
     if (m.forget || m.forget_all) {if(m.forget_all){for(const timer of tickTimers.values())clearInterval(timer);tickTimers.clear();}else {clearInterval(tickTimers.get(m.forget));tickTimers.delete(m.forget);}return ws.send(JSON.stringify({req_id:m.req_id,forget:1}));}
     if (m.ticks) {

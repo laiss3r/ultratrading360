@@ -34,9 +34,11 @@ export async function POST(req: Request) {
   }
 
   let rows: AccountInfo[] = session.accountRows ?? [];
+  // Known signed-cookie rows switch instantly for VIEWING only. New rows still
+  // require discovery. The socket endpoint always verifies current authority.
   // The listing can change after login. Resolve from Deriv rather than rejecting
   // a newly discovered real account just because its cookie snapshot is older.
-  try {
+  if(!rows.some((a)=>a.account_loginid===loginid))try {
     const { accounts } = await validateAccountsForToken(session.accessToken, session.kind);
     const merged = new Map(rows.map((a) => [a.account_loginid, a]));
     for (const account of accounts) merged.set(account.account_loginid, account);
@@ -63,6 +65,7 @@ export async function POST(req: Request) {
     accountsSource: session.accountsSource,
     accountRows: rows,
     accessToken: session.accessToken,
+    authAttemptId: session.authAttemptId,
   };
   const res = NextResponse.json({
     ok: true,

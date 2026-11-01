@@ -46,11 +46,14 @@ describe('session revalidation isolation', () => {
 
 
 describe('fresh-login Real preference', () => {
-  it('promotes a genuine zero-balance Real returned after a Demo-only login', async () => {
+  it('reports the Real candidate without a stale GET overwriting the selected cookie', async () => {
     edge.cookie = encryptSession({ ...session, initialRealAccountPending: true });
     edge.validate.mockResolvedValue({ accounts: [{ account_loginid: 'ROT1', balance: 0, currency: 'USD', is_virtual: 0 }] });
-    const data = await (await GET(new Request('https://example.test/api/deriv/session?refresh=1'))).json();
-    expect(data.session).toMatchObject({loginid:'ROT1',balance:0,isVirtual:false});
+    const response=await GET(new Request('https://example.test/api/deriv/session?refresh=1'));
+    const data=await response.json();
+    expect(data.session.loginid).toBe(session.loginid);expect(data.preferReal).toBe(true);
+    expect(data.accounts).toContainEqual({loginid:'ROT1',balance:0,currency:'USD',isVirtual:false});
+    expect(response.headers.get('set-cookie')).toBeNull();
     expect(data.session.accessToken).toBeUndefined();
     expect(data.session.initialRealAccountPending).toBeUndefined();
   });

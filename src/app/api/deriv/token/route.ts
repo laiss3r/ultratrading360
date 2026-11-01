@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { buildNoAccountsSession, buildSession, DerivAuthError, ensureOptionsAccount, validatePat } from '@/lib/deriv/auth';
+import { buildNoAccountsSession, buildSession, DerivAuthError, validatePat } from '@/lib/deriv/auth';
 import { encryptSession, HANDOFF_COOKIE, publicSession, SESSION_COOKIE, sessionExpirySeconds, signValue } from '@/lib/oauth/session';
 import type { AccountInfo } from '@/lib/deriv/types';
 
@@ -41,11 +41,7 @@ export async function POST(req: Request) {
       const err = e as DerivAuthError;
       if (err.code !== 'no_accounts') throw err;
       noAccounts = true; // authenticated PAT, profile without an Options account yet
-      const created = await ensureOptionsAccount(raw, 'pat');
-      if (created) {
-        accounts = [created];
-        noAccounts = false;
-      }
+
     }
     const primary = accounts.find((a) => a.is_virtual !== 1) ?? accounts[0];
     // PATs carry no expiry we can read from the API; cap the local session at 8 hours so a

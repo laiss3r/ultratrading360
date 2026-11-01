@@ -31,7 +31,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   return <div className="application">
     <header className="topbar"><Link href="/" className="brand" aria-label="UltraTrading360 dashboard"><span className="brand-symbol"><Activity size={23} /></span><span>ULTRA<span className="brand-weight">TRADING</span><b>360</b><small>DERIV TRADING WORKSPACE</small></span></Link>
       <div className="top-status"><span className={status === 'open' ? 'live-dot' : 'stale-dot'} /><span>{status === 'open' ? 'Market feed connected' : status === 'connecting' ? 'Connecting market feed' : 'Market feed offline'}</span></div>
-      <div className="top-actions"><button className="icon-button theme-button" aria-label="Toggle color theme" onClick={() => void useApp.getState().setSettings({ uiTheme: theme === 'dark' ? 'light' : 'dark' })}>{theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}</button><AccountMenu /></div>
+      <div className="top-actions"><button className="icon-button theme-button" aria-label="Toggle color theme" onClick={() => void useApp.getState().setSettings({ uiTheme: theme === 'dark' ? 'light' : 'dark' })}>{theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}</button>{!simple&&<AccountMenu />}</div>
     </header>
     {!simple && <nav className="tool-nav" aria-label="Trading tools">{navigation.map(({ href, label, Icon }) => <Link key={href} href={href} aria-current={pathname === href ? 'page' : undefined}><Icon size={17} /><span>{label}</span></Link>)}<button className="session-toggle" aria-expanded={railOpen} onClick={() => setRailOpen(!railOpen)}><Activity size={17} />Session</button></nav>}
     <div className={`workspace-shell ${simple ? 'single-column' : ''}`}>

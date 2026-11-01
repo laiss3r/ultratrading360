@@ -53,7 +53,7 @@ export function AccountMenu() {
     catch (e) { setMessage((e as Error).message); }
   };
   return <div className="account-anchor" ref={menu}>
-    <button className="account-trigger" aria-haspopup="menu" aria-expanded={open} aria-label={`Account: ${session.loginid}, ${session.isVirtual ? 'Demo' : 'Real'}, ${session.balance.toFixed(2)} ${session.currency}`} onClick={() => { setOpen(!open); if (!open && !incomplete) void useApp.getState().refreshSession(false); }}>
+    <button className="account-trigger" aria-haspopup="menu" aria-expanded={open} aria-label={`Account: ${session.loginid}, ${session.isVirtual ? 'Demo' : 'Real'}, ${session.balance.toFixed(2)} ${session.currency}`} onClick={() => setOpen(!open)}>
       <span className={`wallet-icon ${session.isVirtual ? '' : 'real'}`}><Wallet size={18} /></span>
       <span><small>{session.isVirtual ? 'Demo account' : 'Real account'}</small><strong>{session.balance.toFixed(2)} <em>{session.currency}</em></strong></span><ChevronDown size={15} />
     </button>
@@ -62,7 +62,7 @@ export function AccountMenu() {
       <p className="micro muted">Select an account. Viewing Real never enables trading.</p>
       <div className="account-list">
         {accounts.length === 0 && <p className="muted">No accounts returned yet. Refresh the list below.</p>}
-        {accounts.map((a) => <button key={a.loginid} role="menuitemradio" aria-checked={a.loginid === session.loginid} disabled={Boolean(busy)} className={`account-row ${a.loginid === session.loginid ? 'selected' : ''}`} onClick={() => void select(a.loginid)}><span className={`account-tag ${a.isVirtual ? '' : 'real'}`}>{a.isVirtual ? 'D' : 'R'}</span><span className="account-identity"><b>{a.isVirtual ? 'Demo' : 'Real'}</b><small>{a.loginid}</small></span><span className="account-amount">{a.balance.toFixed(2)}<small>{a.currency}</small></span>{a.loginid === session.loginid && <Check size={16} />}</button>)}
+        {accounts.map((a) => <button key={a.loginid} role="menuitemradio" aria-checked={a.loginid === session.loginid} disabled={Boolean(busy&&busy!=='sync-balances')} className={`account-row ${a.loginid === session.loginid ? 'selected' : ''}`} onClick={() => void select(a.loginid)}><span className={`account-tag ${a.isVirtual ? '' : 'real'}`}>{a.isVirtual ? 'D' : 'R'}</span><span className="account-identity"><b>{a.isVirtual ? 'Demo' : 'Real'}</b><small>{a.loginid}</small></span><span className="account-amount">{a.balance.toFixed(2)}<small>{a.currency}</small></span>{a.loginid === session.loginid && <Check size={16} />}</button>)}
       </div>
       {!accounts.some((a) => !a.isVirtual) && <p className="account-explanation">{busy === 'sync-balances' ? 'Checking Deriv for additional accounts…' : 'No verified Real account is listed yet. Refresh checks both available account sources; a Demo account is never relabelled as Real.'}</p>}
       <div className="balance-state"><i className={balanceStatus === 'live' ? 'live-dot' : 'stale-dot'} />{hasClassicAccounts ? (balanceStatus === 'live' ? 'Classic balance channel connected' : 'Classic balances may be last known') : 'Selected balance updates via its account connection'}<span title={balanceMessage}>ⓘ</span></div>

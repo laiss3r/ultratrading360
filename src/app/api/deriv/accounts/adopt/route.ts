@@ -51,6 +51,7 @@ export async function POST(req: Request) {
     accountsSource: 'classic_browser' as const,
     accountRows: accounts,
     accessToken: session.accessToken,
+    authAttemptId: session.authAttemptId,
   };
   const res = NextResponse.json({
     ok: true,

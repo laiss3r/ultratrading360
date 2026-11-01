@@ -1,11 +1,13 @@
+import { createHash } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { getOAuthClientId, getRedirectUri } from '@/lib/deriv/config';
-import { buildNoAccountsSession, buildSession, DerivAuthError, ensureOptionsAccount, exchangeAuthorizationCode, validateAccountsForToken } from '@/lib/deriv/auth';
+import { buildNoAccountsSession, buildSession, DerivAuthError, exchangeAuthorizationCode, validateAccountsForToken } from '@/lib/deriv/auth';
 import type { AccountInfo } from '@/lib/deriv/types';
 import { safeEqual } from '@/lib/oauth/pkce';
 import {
   encryptSession,
+  decryptSession,
   publicSession,
   HANDOFF_COOKIE,
   SESSION_COOKIE,
@@ -47,6 +49,12 @@ export async function POST(req: Request) {
   if (!state) return fail('missing_state', 'Deriv did not return a state parameter.', 400);
 
   const store = await cookies();
+  const attemptId = createHash('sha256').update(state).digest('hex');
+  const previousRaw = store.get(SESSION_COOKIE)?.value;
+  const previous = previousRaw ? decryptSession(previousRaw) : null;
+  if(previous?.authAttemptId===attemptId&&(!previous.expiresAt||previous.expiresAt>Date.now())) {
+    return NextResponse.json({ok:true,session:publicSession(previous),accounts:(previous.accountRows??[]).map((a)=>({loginid:a.account_loginid,currency:a.currency,balance:a.balance??0,isVirtual:a.is_virtual===1}))});
+  }
   const stateCookie = store.get(STATE_COOKIE)?.value;
   const verifierCookie = store.get(VERIFIER_COOKIE)?.value;
 
@@ -100,15 +108,8 @@ export async function POST(req: Request) {
     if (err.code !== 'no_accounts') {
       return fail(err.code ?? 'account_fetch_failed', err.message, 401);
     }
-    // Authenticated token, zero Options accounts: a legitimate state on the new
-    // platform, not a failed sign-in. Try the idempotent demo creation once so the
-    // sign-in can finish with a real row; otherwise fall through flagged.
+    // Never create/select Demo automatically to make a fresh login appear successful.
     noAccounts = true;
-    const created = await ensureOptionsAccount(token.accessToken, 'oauth');
-    if (created) {
-      accounts = [created];
-      noAccounts = false;
-    }
   }
 
   // Fresh login opens the returned Real account for viewing. Real execution still
@@ -116,12 +117,12 @@ export async function POST(req: Request) {
   const primary = accounts.find((a) => a.is_virtual !== 1) ?? accounts[0];
   const expiresAt = token.expiresIn > 0 ? Date.now() + token.expiresIn * 1000 : null;
   const session = noAccounts
-    ? { ...buildNoAccountsSession('oauth', expiresAt), initialRealAccountPending: primary?.is_virtual !== 0, accessToken: token.accessToken }
+    ? { ...buildNoAccountsSession('oauth', expiresAt), initialRealAccountPending: primary?.is_virtual !== 0, authAttemptId: attemptId, accessToken: token.accessToken }
     : {
         ...buildSession('oauth', primary as AccountInfo, scopes, expiresAt),
         accountsSource: source,
         accountRows: accounts,
-        initialRealAccountPending: primary?.is_virtual !== 0, accessToken: token.accessToken,
+        initialRealAccountPending: primary?.is_virtual !== 0, authAttemptId: attemptId, accessToken: token.accessToken,
       };
 
   const res = NextResponse.json({
