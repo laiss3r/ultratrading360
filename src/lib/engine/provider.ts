@@ -3,6 +3,7 @@ import { DerivClient } from '../deriv/client';
 import { MarketDataService } from '../deriv/market';
 import { ContractService, type ContractType } from '../deriv/contracts';
 import { TradingService, type BuyRequest } from '../deriv/trading';
+import { brokerNumber } from '../deriv/numbers';
 import { lastDigit } from '../deriv/digits';
 import type { ContractUpdate } from './execution';
 
@@ -87,8 +88,7 @@ export interface MarketProvider {
   /** Price a contract from a real Deriv proposal. */
   price(req: PriceRequest): Promise<PricedContract>;
   /**
-   * Execute and settle a contract. Simulation settles locally from its own tick stream.
-   * Deriv performs a real purchase and waits for `proposal_open_contract` to settle.
+   * Execute and settle a contract. Deriv performs a real purchase and waits for `proposal_open_contract` to settle.
    */
   execute(priced: PricedContract, opts: ExecuteOptions): Promise<SettledContract>;
 }
@@ -117,13 +117,24 @@ export class DerivProvider implements MarketProvider {
     this.tradingSvc = new TradingService(this.client, this.contractSvc);
   }
 
-  async streamBalance(onBalance: (balance: number, currency: string) => void): Promise<void> {
+  async streamBalance(onBalance: (balance: number, currency: string) => void, expected?: {loginid:string;currency:string}): Promise<void> {
+    const parse = (m: import('@/lib/deriv/types').DerivMessage) => {
+      const b = m.balance as { balance?: unknown; currency?: unknown; loginid?: unknown } | undefined;
+      const amount = brokerNumber(b?.balance);
+      if (amount === undefined || amount < 0 || typeof b?.currency !== 'string' || !b.currency.trim())
+        throw new Error('Deriv balance verification returned a missing or invalid amount/currency. No purchase is allowed.');
+      if (expected && (b.currency !== expected.currency || (b.loginid !== undefined && b.loginid !== expected.loginid)))
+        throw new Error('Deriv balance identity/currency does not match the selected account. No purchase is allowed.');
+      return {balance:amount,currency:b.currency};
+    };
     const handle = (m: import('@/lib/deriv/types').DerivMessage) => {
-      const b = m.balance as { balance?: number; currency?: string } | undefined;
-      if (b && typeof b.balance === 'number' && typeof b.currency === 'string') onBalance(b.balance, b.currency);
+      if (!m.balance) return;
+      try { const b=parse(m);onBalance(b.balance,b.currency); }
+      catch { this.client.close(); } // Revoke verification on a malformed or mismatched replay.
     };
     const first = await this.client.subscribe({ balance: 1 }, handle, 'account-balance');
-    handle(first);
+    const b=parse(first); // Fail explicitly, rather than returning an apparently verified socket.
+    onBalance(b.balance,b.currency);
   }
 
   get connectionStatus() {

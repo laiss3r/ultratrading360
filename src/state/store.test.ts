@@ -177,3 +177,14 @@ it('persists rapid permission changes in order so an older write cannot undo Sto
  const off=useApp.getState().setSettings({limits:{...DEFAULT_SETTINGS.limits,tradingEnabled:false}});
  expect(save).toHaveBeenCalledTimes(1);release();await Promise.all([on,off]);expect(save).toHaveBeenCalledTimes(2);expect(save.mock.calls[1][0].limits.tradingEnabled).toBe(false);expect(useApp.getState().settings.limits.tradingEnabled).toBe(false);
 });
+
+it('keeps the working market provider if authenticated balance verification fails',async()=>{
+ const previous={isConnected:()=>true,disconnect:vi.fn()} as unknown as MarketProvider;
+ useApp.setState({session:{...real,isVirtual:true,loginid:'DOT1'},provider:previous,tradingLoginid:null,bot:null,botState:'idle'});
+ vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify({ok:true,url:'ws://fixture/DOT1',loginid:'DOT1',mode:'deriv_demo'}))));
+ const connect=vi.spyOn(DerivProvider.prototype,'connect').mockResolvedValue();const balance=vi.spyOn(DerivProvider.prototype,'streamBalance').mockRejectedValue(new Error('Invalid broker balance'));
+ try{await useApp.getState().attachTradingSocket('deriv_demo');expect(useApp.getState().provider).toBe(previous);expect(previous.disconnect).not.toHaveBeenCalled();expect(useApp.getState().tradingLoginid).toBeNull();expect(useApp.getState().tradingMessage).toBe('Invalid broker balance');expect(useApp.getState().tradingConnecting).toBe(false);}finally{connect.mockRestore();balance.mockRestore();}
+});
+it('rejects an OTP response for another account before touching the existing market provider',async()=>{
+ const previous={disconnect:vi.fn()} as unknown as MarketProvider;useApp.setState({session:{...real,isVirtual:true,loginid:'DOT1'},provider:previous});vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify({ok:true,url:'ws://fixture/OTHER',loginid:'OTHER',mode:'deriv_demo'}))));await useApp.getState().attachTradingSocket('deriv_demo');expect(previous.disconnect).not.toHaveBeenCalled();expect(useApp.getState().provider).toBe(previous);expect(useApp.getState().tradingMessage).toContain('mismatched');
+});

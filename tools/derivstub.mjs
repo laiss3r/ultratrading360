@@ -96,7 +96,7 @@ market.on('connection', (ws, req) => {
   ws.on('message', (raw) => {
     const m = JSON.parse(raw.toString());
     if (m.ping) return ws.send(JSON.stringify({ msg_type: 'ping', ping: m.ping }));
-    if (m.balance) { balanceReq=m; return ws.send(JSON.stringify({req_id:m.req_id, subscription:{id:'balance'}, balance:{balance:fixtureBalance,currency:'USD'}})); }
+    if (m.balance) { balanceReq=m; return ws.send(JSON.stringify({req_id:m.req_id, subscription:{id:'balance'}, balance:{balance:process.env.STUB_STRING_BALANCE==='1'?fixtureBalance.toFixed(2):fixtureBalance,currency:'USD'}})); }
     if (process.env.STUB_TRADING === '1' && m.proposal) {
       const id=`fixture-proposal-${++proposalIndex}`;proposals.set(id,{...m});
       return ws.send(JSON.stringify({req_id:m.req_id,msg_type:'proposal',proposal:{id,ask_price:String(m.amount),payout:String(Math.round(m.amount*1.95*100)/100),spot:100,spot_value:'100.00',date_start:Math.floor(Date.now()/1000),date_expiry:Math.floor(Date.now()/1000)+3,longcode:'Synthetic fixture only'}}));
@@ -109,7 +109,7 @@ market.on('connection', (ws, req) => {
     if (process.env.STUB_TRADING === '1' && m.proposal_open_contract) {
       const proposal=contracts.get(m.contract_id);const won=m.contract_id>2;const profit=won?Math.round(proposal.amount*.95*100)/100:-proposal.amount;
       const frame={req_id:m.req_id,msg_type:'proposal_open_contract',subscription:{id:`fixture-contract-${m.contract_id}`},proposal_open_contract:{contract_id:m.contract_id,is_sold:0,status:'open',buy_price:String(proposal.amount),profit:'0.00',bid_price:'0.00',payout:String(Math.round(proposal.amount*1.95*100)/100),entry_spot:'100.01',currency:proposal.currency}};ws.send(JSON.stringify(frame));
-      setTimeout(()=>{if(ws.readyState!==1)return;fixtureBalance=Math.round((fixtureBalance+profit)*100)/100;ws.send(JSON.stringify({...frame,proposal_open_contract:{...frame.proposal_open_contract,is_sold:1,status:won?'won':'lost',profit:String(profit),bid_price:String(proposal.amount+profit),exit_spot:'100.08',date_settlement:Math.floor(Date.now()/1000)}}));if(balanceReq)ws.send(JSON.stringify({req_id:balanceReq.req_id,subscription:{id:'balance'},balance:{balance:fixtureBalance,currency:'USD'}}));},Number(process.env.STUB_SETTLE_MS||350));return;
+      setTimeout(()=>{if(ws.readyState!==1)return;fixtureBalance=Math.round((fixtureBalance+profit)*100)/100;ws.send(JSON.stringify({...frame,proposal_open_contract:{...frame.proposal_open_contract,is_sold:1,status:won?'won':'lost',profit:String(profit),bid_price:String(proposal.amount+profit),exit_spot:'100.08',date_settlement:Math.floor(Date.now()/1000)}}));if(balanceReq)ws.send(JSON.stringify({req_id:balanceReq.req_id,subscription:{id:'balance'},balance:{balance:process.env.STUB_STRING_BALANCE==='1'?fixtureBalance.toFixed(2):fixtureBalance,currency:'USD'}}));},Number(process.env.STUB_SETTLE_MS||350));return;
     }
     if (process.env.STUB_TRADING === '1' && m.ticks_history) {
       let seed=38231;const randomDigit=()=>{seed=(seed*1664525+1013904223)>>>0;return (seed>>>16)%10;};

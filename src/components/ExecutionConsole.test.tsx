@@ -18,3 +18,10 @@ describe('broker session views within the approved design',()=>{
 it('does not show a prior account ledger or a Demo label when no account identity was returned',()=>{
  f.state.session={loginid:'',currency:'USD'};render(<ExecutionConsole/>);expect(document.body.textContent).toContain('No trading account selected');expect(document.body.textContent).not.toContain('DOT_TEST');expect(document.body.textContent).not.toContain('999');fireEvent.click(screen.getByRole('tab',{name:'Journal'}));expect(document.body.textContent).not.toContain('Actual broker settlement');
 });
+
+it('keeps actual session totals visible on Transactions and Journal, like the reference',()=>{
+ render(<ExecutionConsole/>);for(const tab of ['Transactions','Journal']){fireEvent.click(screen.getByRole('tab',{name:tab}));expect(screen.getByLabelText('Session totals').textContent).toContain('-0.50');expect(screen.getByText('Contracts lost').parentElement?.textContent).toContain('1');expect(screen.getByText('Contracts won').parentElement?.textContent).toContain('0');}
+});
+it('renders supplied Run control when idle and only Stop when running',()=>{
+ const {rerender}=render(<ExecutionConsole runControl={<button>Start selected bot</button>}/>);expect(screen.getByText('Start selected bot')).toBeTruthy();f.state.botState='running';rerender(<ExecutionConsole runControl={<button>Start selected bot</button>}/>);expect(screen.queryByText('Start selected bot')).toBeNull();expect(screen.getByRole('button',{name:'Stop bot'})).toBeTruthy();
+});

@@ -625,6 +625,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
     const revision = modeRevision;
     const current = () => revision===modeRevision&&get().session?.loginid===loginid;
     if(mode!==(get().session!.isVirtual?'deriv_demo':'deriv_real'))return;
+    let candidate:DerivProvider|null=null;
     set({tradingConnecting:true,tradingMessage:'Connecting the selected account and verifying its broker balance…'});
     try {
       const r = await fetch('/api/deriv/socket', {
@@ -640,8 +641,8 @@ export const useApp = create<State & Actions>()((set, get) => ({
         return;
       }
       if (get().session?.loginid !== loginid) return;
+      if (!j.url || j.loginid!==loginid || j.mode!==mode) throw new Error('Deriv returned an incomplete or mismatched account socket. Reconnect this selected account.');
       const prev = get().provider;
-      prev?.disconnect();
       let firstUrl: string | null = j.url ?? null;
       const authed = new DerivProvider(mode, {
         urlFactory: async () => {
@@ -657,18 +658,26 @@ export const useApp = create<State & Actions>()((set, get) => ({
         },
         onStatus: (s) => { if (get().provider === authed) set({ connectionStatus: s, ...(s !== 'open' ? { tradingLoginid: null } : {}) }); },
       });
-      set({ provider: authed });
+      candidate=authed;
       await authed.connect();
-      if (get().provider !== authed || get().session?.loginid !== loginid) { authed.disconnect(); return; }
-      set({ connectionStatus: 'open' });
-      await authed.streamBalance((balance, currency) => {
-        if (get().session?.loginid !== loginid || get().provider !== authed) return;
-        set({ tradingLoginid: loginid, tradingMessage:null, session: { ...get().session!, balance, currency, balanceKnown: true },
-          accounts: get().accounts.map((a) => a.loginid === loginid ? { ...a, balance, currency } : a) });
-      });
+      if (!current() || get().provider!==prev) { authed.disconnect(); return; }
+      let verified:{balance:number;currency:string}|null=null;
+      const acceptBalance=(balance:number,currency:string)=>{
+        verified={balance,currency};
+        if (!current() || get().provider!==authed) return;
+        set({ tradingLoginid:loginid,tradingMessage:null,session:{...get().session!,balance,currency,balanceKnown:true},
+          accounts:get().accounts.map(a=>a.loginid===loginid?{...a,balance,currency}:a) });
+      };
+      await authed.streamBalance(acceptBalance,{loginid,currency:get().session!.currency});
+      if (!current() || get().provider!==prev) { authed.disconnect(); return; }
+      if (!verified || !authed.isConnected()) throw new Error('Deriv did not confirm the selected account balance. No bot was started.');
+      prev?.disconnect();
+      set({provider:authed,connectionStatus:'open'});
+      acceptBalance((verified as {balance:number;currency:string}).balance,(verified as {balance:number;currency:string}).currency);
       await get().subscribeTicks(get().activeSymbol);
       get().pushLog('ok', `Authenticated trading socket open for ${loginid} (${j.mode}).`);
     } catch (e) {
+      candidate?.disconnect();
       if(current()){set({tradingMessage:(e as Error).message,tradingLoginid:null});get().pushLog('error', `Trading socket error: ${(e as Error).message}`);}
     }finally{if(current())set({tradingConnecting:false});}
   },
@@ -878,7 +887,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
     if (provider.mode !== (get().session!.isVirtual ? 'deriv_demo' : 'deriv_real') || mode !== provider.mode) return { ok: false, message: 'The account environment and trading provider do not match. Reconnect before running.' };
     if (s.currency !== get().session!.currency) return { ok: false, message: 'Strategy currency does not match the selected account. Review the setup.' };
     if (get().tradingLoginid !== get().session?.loginid) {
-      return { ok: false, message: `No verified trading connection for the selected account. ${get().tradingMessage??'Reconnect, and acknowledge Real trading in Risk settings if applicable.'}` };
+      return { ok: false, message: `No verified trading connection for ${get().session!.loginid}. ${get().tradingMessage??(get().session!.isVirtual?'Reconnect the Demo trading channel; Real acknowledgement is not required.':'Reconnect and confirm Real-money permission for this account.')}` };
     }
     if (!get().settings.limits.tradingEnabled) {
       return { ok: false, message: 'Trading is disabled. Enable it in Risk settings — the bot refuses to run otherwise.' };

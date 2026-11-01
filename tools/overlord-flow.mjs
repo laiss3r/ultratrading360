@@ -9,6 +9,7 @@ const loginid = mode === 'real' ? 'ROT90004581' : 'DOT90004580';
 const otherId = mode === 'real' ? 'DOT90004580' : 'ROT90004581';
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+await context.addInitScript(()=>{const Native=window.WebSocket;window.WebSocket=class extends Native{constructor(url,protocols){super(String(url).includes('/options/ws/public')?'ws://127.0.0.1:4519/public':url,...(protocols===undefined?[]:[protocols]));}};});
 const page = await context.newPage();
 const errors = []; const checks = [];
 page.on('pageerror', (error) => errors.push(error.message));
@@ -77,8 +78,8 @@ try {
   check((await accountButton().getAttribute('aria-label')).includes(loginid), 'verified execution uses explicitly selected environment');
   await configureBot();
   await main.getByRole('button', { name: 'Find market', exact: true }).click();
-  await main.getByText(/2 \/ 2 markets/).waitFor({ timeout: 40000 });
-  check((await main.innerText()).includes('New live outcomes'), 'scanner shows measured forward-validation evidence');
+  await main.getByText(/2 \/ 2 markets analysed/).waitFor({ timeout: 40000 });
+  check((await main.innerText()).includes('New outcomes for current pattern'), 'scanner shows measured forward-validation evidence');
   check(!(await main.innerText()).includes('84.9% confidence'), 'scanner does not fabricate screenshot confidence');
   await confirmRun();
   await page.waitForTimeout(2000);
@@ -98,6 +99,8 @@ try {
   await consolePanel().getByRole('tab', { name: 'Transactions', exact: true }).click();
   const transactionText = await consolePanel().innerText();
   check(transactionText.includes('100.01') && transactionText.includes('100.08'), 'transactions expose broker entry and exit spots');
+  const csvDownload=page.waitForEvent('download');await consolePanel().getByRole('button',{name:'Download transactions'}).click();const csvFile=await csvDownload;const csv=await fs.readFile(await csvFile.path(),'utf8');check(csv.includes('net_profit')&&csv.includes(loginid)&&csv.split('\n').length===4,'transaction download includes exactly the selected run and account');
+  await page.screenshot({path:`/home/user/execution-${mode}-transactions.png`,fullPage:true});
   await consolePanel().getByRole('tab', { name: 'Journal', exact: true }).click();
   const journal = await consolePanel().innerText();
   check(['pricing', 'buying', 'open', 'settled'].every((phase) => journal.toLowerCase().includes(phase)), 'journal retains chronological broker lifecycle');
@@ -108,7 +111,7 @@ try {
   check(exported.length > 10 && exported.every((entry) => entry.accountLoginid === loginid), 'journal download is scoped to selected account');
   await consolePanel().getByRole('button', { name: 'Reset session view' }).click();
   await consolePanel().getByRole('tab', { name: 'Summary', exact: true }).click();
-  check((await consolePanel().innerText()).includes('0 settled'), 'reset clears displayed run totals without inventing a session');
+  check((await consolePanel().getByText('Purchased runs',{exact:true}).locator('..').innerText()).includes('0'), 'reset clears displayed run totals without inventing a session');
   await navigate('/history');
   check(await main.locator('tbody tr').count() === 3, 'view reset preserves broker transaction history');
   await navigate('/overlord');
@@ -138,6 +141,12 @@ try {
   const stopped = await ledger();
   check(stopped.length === 1, 'Stop prevents a second entry after pending settlement');
   check(!(await consolePanel().getByRole('button', { name: 'Reset session view' }).isDisabled()), 'broker settlement releases pending reset lock after Stop');
+  await configureBot();
+  await main.getByRole('spinbutton',{name:/^Stop loss/}).fill('1');
+  await page.request.post('http://127.0.0.1:4517/__fixture/reset');
+  await confirmRun();await waitOpen();
+  await page.waitForFunction(()=>document.querySelector('.workspace-main')?.textContent?.includes('Session loss limit hit'),undefined,{timeout:60000});
+  await page.waitForTimeout(800);check((await ledger()).length===1,'stop-loss trigger stops after exactly one losing settlement at the configured limit');
   check(errors.length === 0, `no browser runtime errors (${errors.join('; ')})`);
   console.log(JSON.stringify({ synthetic: true, mode, passed: checks.length }, null, 2));
 } catch (error) {

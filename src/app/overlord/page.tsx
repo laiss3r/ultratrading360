@@ -53,7 +53,7 @@ export default function OverlordPage() {
     <PageTitle eyebrow="CONFIGURE · OBSERVE · AUTOMATE" title="Overlord Pro" description="Signal-gated trading with live pattern validation, an optional recovery contract and capped stake progression."/>
     <Notice tone="warning">Entries wait for qualified live evidence and broker payout checks on the selected Demo or Real account. No signal guarantees a win. Martingale can increase losses rapidly; Real trades risk actual money.</Notice>
     {message && <Notice tone="error">{message}</Notice>}{savedMessage && <Notice tone="success">{savedMessage}</Notice>}
-    <Panel title="Bot session" subtitle="Summary, transactions and the actual execution journal"><ExecutionConsole/></Panel>
+    <Panel title="Bot session" subtitle="Summary, transactions and the actual execution journal"><ExecutionConsole runControl={<RunButton prepare={prepare}>Run bot</RunButton>}/></Panel>
     <Panel title="Trading setup" subtitle="Choose your contract and an actual Deriv volatility market">
       <div className="form-grid">
         <Field label="Contract type"><select value={config.contractType} disabled={running} onChange={(e) => change({contractType:e.target.value as ContractType})}>{contractOptions}</select></Field>
@@ -74,7 +74,7 @@ export default function OverlordPage() {
         <p className="micro muted">Return after a recovery win: primary until a non-win, then recovery until a positive settlement. Switch on loss: change leg only on a non-win. Alternate: change leg after the chosen number of settlements. Zero profit counts as a non-win.</p>
         <Toggle label="Enable martingale" checked={config.martingale} disabled={running} onChange={(value) => change({martingale:value})}/>
         {config.martingale && <><div className="form-grid">{numberField('Multiplier','multiplier',1.01,10,'.01')}{numberField('Maximum escalation steps','maxSteps',1,10)}</div><Notice tone="warning">Next requested stake = initial stake × multiplier raised to consecutive non-wins, up to the step cap; a win resets it. The risk manager caps the final amount at {limits.maxStake} {session?.currency ?? ''} or a stricter strategy/exposure limit. Losses can accumulate even at the cap.</Notice></>}
-        <div className="button-row">{running ? <Button variant="danger" onClick={() => useApp.getState().stopBot('Overlord stopped by user')}><Square size={14}/>Stop bot</Button> : <RunButton prepare={prepare}>Run bot</RunButton>}<Button variant="secondary" disabled={running} onClick={() => void prepare().then(() => {setMessage('');setSavedMessage('Setup saved. Saving does not place orders.');}).catch((e:Error) => setMessage(e.message))}>Save setup</Button></div>
+        <div className="button-row">{running ? <Button variant="danger" onClick={() => useApp.getState().stopBot('Overlord stopped by user')}><Square size={14}/>Stop bot</Button> : null}<Button variant="secondary" disabled={running} onClick={() => void prepare().then(() => {setMessage('');setSavedMessage('Setup saved. Saving does not place orders.');}).catch((e:Error) => setMessage(e.message))}>Save setup</Button></div>
         <p className="micro muted">Run opens an account/stake confirmation before execution. Trading permission and Real acknowledgement remain in Risk settings. Keep this browser tab open; reloading does not auto-resume a bot.</p>
       </div>
     </Panel>
