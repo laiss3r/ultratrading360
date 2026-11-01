@@ -161,6 +161,8 @@ export class DerivProvider implements MarketProvider {
    * Enumerate real Deriv markets. Only the live provider can do this; the simulation provider
    * deliberately has no equivalent, so callers branch on provider type.
    */
+  async contractsFor(symbol:string):Promise<import('@/lib/deriv/types').ContractSpec[]> { return this.contractSvc.contractsFor(symbol); }
+
   async activeSymbols(productType?: string): Promise<import('@/lib/deriv/types').ActiveSymbol[]> {
     return this.marketSvc.activeSymbols(productType);
   }

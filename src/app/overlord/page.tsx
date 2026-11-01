@@ -4,11 +4,13 @@ import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Bot, ArrowRight, Square } from 'lucide-react';
 import { templates, strategyFromTemplate } from '@/lib/frontend-templates';
-import { CONTRACT_LABELS, DEFAULT_OVERLORD, eligibleMarkets, overlordStrategy, type OverlordConfig } from '@/lib/overlord';
+import { CONTRACT_LABELS, DEFAULT_OVERLORD, overlordStrategy, type OverlordConfig } from '@/lib/overlord';
 import { ContractService, type ContractType } from '@/lib/deriv/contracts';
 import { useApp } from '@/state/store';
 import { Button, Field, Notice, PageTitle, Panel, Empty, Toggle } from '@/components/ui';
-import { LiveSignals } from '@/components/LiveSignals';
+import { OverlordDiscovery } from '@/components/OverlordDiscovery';
+import {volatilityMarkets,isAvailable} from '@/lib/overlord/discovery';
+import type {ActiveSymbol} from '@/lib/deriv/types';
 import { ExecutionConsole } from '@/components/ExecutionConsole';
 import { RunButton } from '@/components/Workspace';
 
@@ -24,7 +26,8 @@ export default function OverlordPage() {
   const [message, setMessage] = useState('');
   const [savedMessage, setSavedMessage] = useState('');
   const draftId = useRef<string | null>(null);
-  const markets = eligibleMarkets(symbols).slice(0, 20);
+  const [discoveredMarkets,setDiscoveredMarkets]=useState<ActiveSymbol[]|null>(null);
+  const markets = volatilityMarkets(discoveredMarkets??symbols).filter(isAvailable);
   const running = ['starting','running','paused','stopping'].includes(botState);
   const change = (patch: Partial<OverlordConfig>) => {
     setSavedMessage('');setConfig((current)=>({...current,...patch}));
@@ -32,7 +35,7 @@ export default function OverlordPage() {
   const prepare = async () => {
     const state = useApp.getState();
     if (state.bot?.hasPendingOrder() || ['starting','running','paused','stopping'].includes(state.botState)) throw new Error('Stop the active bot and wait for its contract to settle before preparing another.');
-    if (!eligibleMarkets(state.symbols).some((s) => s.underlying_symbol === state.activeSymbol)) throw new Error('Choose an open volatility market returned by Deriv.');
+    if (!markets.some((s) => s.underlying_symbol === state.activeSymbol)) throw new Error('Choose an open volatility market returned by Deriv.');
     const strategy = overlordStrategy(config, state.activeSymbol, state.session?.currency ?? 'USD', state.settings.limits);
     if (draftId.current) strategy.id = draftId.current;
     const saved = await state.saveStrategy(strategy);
@@ -57,7 +60,7 @@ export default function OverlordPage() {
     <Panel title="Trading setup" subtitle="Choose your contract and an actual Deriv volatility market">
       <div className="form-grid">
         <Field label="Contract type"><select value={config.contractType} disabled={running} onChange={(e) => change({contractType:e.target.value as ContractType})}>{contractOptions}</select></Field>
-        <Field label="Market"><select value={activeSymbol} disabled={running} onChange={(e) => void useApp.getState().selectSymbol(e.target.value)}>{!markets.some((s) => s.underlying_symbol === activeSymbol) && <option value={activeSymbol}>{activeSymbol} · awaiting market discovery</option>}{markets.map((s) => <option key={s.underlying_symbol} value={s.underlying_symbol}>{s.underlying_symbol_name}</option>)}</select></Field>
+        <Field label="Market"><select value={activeSymbol} disabled={running} onChange={(e) => void useApp.getState().selectSymbol(e.target.value)}>{!markets.some((s) => s.underlying_symbol === activeSymbol) && <option value={activeSymbol}>Awaiting Volatility market discovery</option>}{markets.map((s) => <option key={s.underlying_symbol} value={s.underlying_symbol}>{s.underlying_symbol_name}</option>)}</select></Field>
         {ContractService.requiresBarrier(config.contractType) && <Field label="Prediction digit"><input type="number" min="0" max="9" step="1" disabled={running} value={config.barrier} onChange={(e) => change({barrier:Number(e.target.value)})}/></Field>}
         {numberField('Initial stake','stake',limits.minStake,limits.maxStake,'.01')}
         <Field label="Duration"><select value={config.duration} disabled={running} onChange={(e) => change({duration:Number(e.target.value)})}>{Array.from({length:10},(_,i) => <option value={i+1} key={i}>{i+1} {i===0?'tick':'ticks'}</option>)}</select></Field>
@@ -67,7 +70,7 @@ export default function OverlordPage() {
       </div>
       <p className="micro muted">Amounts use {session?.currency ?? 'the selected account currency'}. Global Risk settings may impose stricter caps. Open contracts can settle after Stop.</p>
     </Panel>
-    <LiveSignals contractType={config.contractType} barrier={config.barrier} duration={config.duration} disabled={running}/>
+    <OverlordDiscovery duration={config.duration} disabled={running} onMarkets={setDiscoveredMarkets} onSelect={(symbol,opportunity)=>{change({contractType:opportunity.contractType,...(opportunity.barrier!==undefined?{barrier:opportunity.barrier}:{})});void useApp.getState().selectSymbol(symbol);setSavedMessage('Historical result applied to setup. No order was placed; Run still requires live entry checks.');}}/>
     <Panel title="Recovery & stake progression" subtitle="Contract switching and stake escalation are independent; neither guarantees recovery">
       <div className="stack"><Toggle label="Recovery mode — use a second contract" checked={config.recoveryEnabled} disabled={running} onChange={(value) => change({recoveryEnabled:value})}/>
         {config.recoveryEnabled && <div className="form-grid"><Field label="Recovery contract"><select disabled={running} value={config.recoveryContract} onChange={(e) => change({recoveryContract:e.target.value as ContractType})}>{contractOptions}</select></Field>{ContractService.requiresBarrier(config.recoveryContract) && <Field label="Recovery prediction digit"><input type="number" min="0" max="9" value={config.recoveryBarrier} disabled={running} onChange={(e) => change({recoveryBarrier:Number(e.target.value)})}/></Field>}<Field label="Recovery setting"><select value={config.recoveryMode} disabled={running} onChange={(e) => change({recoveryMode:e.target.value as OverlordConfig['recoveryMode']})}><option value="return-after-recovery">Return after a recovery win</option><option value="switch-on-loss">Switch contracts on loss</option><option value="alternate">Alternate contracts</option></select></Field>{config.recoveryMode==='alternate' && numberField('Settled entries per leg','alternateTimes',1,5)}</div>}

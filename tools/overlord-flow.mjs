@@ -78,8 +78,8 @@ try {
   check((await accountButton().getAttribute('aria-label')).includes(loginid), 'verified execution uses explicitly selected environment');
   await configureBot();
   await main.getByRole('button', { name: 'Find market', exact: true }).click();
-  await main.getByText(/2 \/ 2 markets analysed/).waitFor({ timeout: 40000 });
-  check((await main.innerText()).includes('New outcomes for current pattern'), 'scanner shows measured forward-validation evidence');
+  await main.getByText(/2 \/ 2 Volatility markets processed/).waitFor({ timeout: 40000 });
+  check((await main.innerText()).includes('non-overlapping 1-tick outcomes'), 'Overlord discovery shows measured historical outcomes without waiting for live validation');
   check(!(await main.innerText()).includes('84.9% confidence'), 'scanner does not fabricate screenshot confidence');
   await confirmRun();
   await page.waitForTimeout(2000);
