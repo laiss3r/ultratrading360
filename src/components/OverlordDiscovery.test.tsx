@@ -19,3 +19,6 @@ it('running a bot blocks applying historical results, not read-only analysis',as
 it('reports discovery errors and permits an explicit retry',async()=>{
  const list=vi.mocked(f.provider.activeSymbols as ()=>Promise<unknown>);list.mockRejectedValueOnce(Error('Discovery unavailable'));render(<OverlordDiscovery duration={1} disabled={false} onSelect={vi.fn()} onMarkets={vi.fn()}/>);fireEvent.click(screen.getByRole('button',{name:'Find market'}));await screen.findByText(/Discovery unavailable/);fireEvent.click(screen.getByRole('button',{name:'Retry discovery'}));await screen.findByText('Analysed');await waitFor(()=>expect(list).toHaveBeenCalledTimes(2));
 });
+it('renders Run beside each analysed market and the highlighted best result',async()=>{
+ const renderRun=vi.fn((row:{symbol:string},expired:boolean)=><button disabled={expired}>Run {row.symbol}</button>);render(<OverlordDiscovery duration={1} disabled={false} onSelect={vi.fn()} onMarkets={vi.fn()} renderRun={renderRun}/>);expect(screen.queryByRole('button',{name:'Run R_10S'})).toBeNull();fireEvent.click(screen.getByRole('button',{name:'Find market'}));await screen.findByText('Analysed');expect(screen.getAllByRole('button',{name:'Run R_10S'})).toHaveLength(2);expect(renderRun).toHaveBeenCalledWith(expect.objectContaining({symbol:'R_10S',phase:'ready'}),false);
+});

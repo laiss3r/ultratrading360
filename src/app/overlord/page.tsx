@@ -8,6 +8,7 @@ import { CONTRACT_LABELS, DEFAULT_OVERLORD, overlordStrategy, type OverlordConfi
 import { ContractService, type ContractType } from '@/lib/deriv/contracts';
 import { useApp } from '@/state/store';
 import { Button, Field, Notice, PageTitle, Panel, Empty, Toggle } from '@/components/ui';
+import {ScannedMarketRun} from '@/components/ScannedMarketRun';
 import { OverlordDiscovery } from '@/components/OverlordDiscovery';
 import {volatilityMarkets,isAvailable} from '@/lib/overlord/discovery';
 import type {ActiveSymbol} from '@/lib/deriv/types';
@@ -69,7 +70,7 @@ export default function OverlordPage() {
       </div>
       <p className="micro muted">Amounts use {session?.currency ?? 'the selected account currency'}. Global Risk settings may impose stricter caps. Open contracts can settle after Stop.</p>
     </Panel>
-    <OverlordDiscovery duration={config.duration} disabled={running} onMarkets={setDiscoveredMarkets} onSelect={(symbol,opportunity)=>{change({contractType:opportunity.contractType,...(opportunity.barrier!==undefined?{barrier:opportunity.barrier}:{})});void useApp.getState().selectSymbol(symbol);setSavedMessage('Historical result applied to setup. No order was placed; Run still requires live entry checks.');}}/>
+    <OverlordDiscovery duration={config.duration} disabled={running} renderRun={(row,expired)=><ScannedMarketRun expired={expired} row={row} config={config} markets={markets} disabled={running} onPrepared={next=>{change(next);setSavedMessage('Scanned market’s best setup prepared. Confirm & run starts the session with live entry checks.');}}/>} onMarkets={setDiscoveredMarkets} onSelect={(symbol,opportunity)=>{change({contractType:opportunity.contractType,...(opportunity.barrier!==undefined?{barrier:opportunity.barrier}:{})});void useApp.getState().selectSymbol(symbol);setSavedMessage('Historical result applied to setup. No order was placed; Run still requires live entry checks.');}}/>
     <Panel title="Recovery & stake progression" subtitle="Contract switching and stake escalation are independent; neither guarantees recovery">
       <div className="stack"><Toggle label="Recovery mode — use a second contract" checked={config.recoveryEnabled} disabled={running} onChange={(value) => change({recoveryEnabled:value})}/>
         {config.recoveryEnabled && <div className="form-grid"><Field label="Recovery contract"><select disabled={running} value={config.recoveryContract} onChange={(e) => change({recoveryContract:e.target.value as ContractType})}>{contractOptions}</select></Field>{ContractService.requiresBarrier(config.recoveryContract) && <Field label="Recovery prediction digit"><input type="number" min="0" max="9" value={config.recoveryBarrier} disabled={running} onChange={(e) => change({recoveryBarrier:Number(e.target.value)})}/></Field>}<Field label="Recovery setting"><select value={config.recoveryMode} disabled={running} onChange={(e) => change({recoveryMode:e.target.value as OverlordConfig['recoveryMode']})}><option value="return-after-recovery">Return after a recovery win</option><option value="switch-on-loss">Switch contracts on loss</option><option value="alternate">Alternate contracts</option></select></Field>{config.recoveryMode==='alternate' && numberField('Settled entries per leg','alternateTimes',1,5)}</div>}
