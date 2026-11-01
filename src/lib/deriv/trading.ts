@@ -24,6 +24,7 @@ export interface ExecutedTrade {
   currency: string;
   dateStart: number;
   dateExpiry: number;
+  transactionId?:string;
   /** The proposal that was actually verified immediately before purchase. */
   verifiedProposal: Proposal;
 }
@@ -80,7 +81,7 @@ export class TradingService {
     opts.onBuying?.();
     if (opts.shouldExecute && !opts.shouldExecute(proposal)) throw new OrderCancelledError();
     // 3. Buy by proposal id.
-    let res: { buy: { buy_price: number; contract_id: number; payout: number; longcode: string; currency: string; start_time?: number; purchase_time?: number } };
+    let res: { buy: { buy_price: number; contract_id: number; payout: number; longcode: string; currency: string; start_time?: number; purchase_time?: number; transaction_id?:number|string } };
     try {
       res = await this.client.send({ buy: proposal.id, price: proposal.ask_price });
     } catch (e) {
@@ -93,6 +94,7 @@ export class TradingService {
     const buyPrice=requiredBrokerNumber(b.buy_price,'executed buy price'),payout=requiredBrokerNumber(b.payout,'potential payout');
     return {
       contractId: b.contract_id,
+      transactionId:b.transaction_id===undefined?undefined:String(b.transaction_id),
       proposalId: proposal.id,
       buyPrice,
       payout,
@@ -118,7 +120,7 @@ export class TradingService {
         if (!raw || brokerNumber(raw.contract_id)!==contractId) return;
         // Current Options API uses decimal strings and entry_spot/exit_spot.
         // Keep legacy aliases for classic-compatible responses, never infer zero.
-        const c={...raw,contract_id:contractId,buy_price:brokerNumber(raw.buy_price),payout:brokerNumber(raw.payout),profit:brokerNumber(raw.profit),bid_price:brokerNumber(raw.bid_price),current_spot:brokerNumber(raw.current_spot),entry_tick:brokerNumber(raw.entry_spot)??brokerNumber(raw.entry_tick),exit_tick:brokerNumber(raw.exit_spot)??brokerNumber(raw.exit_tick),date_settlement:brokerNumber(raw.date_settlement),is_sold:brokerNumber(raw.is_sold)} as OpenContract;
+        const c={...raw,contract_id:contractId,buy_price:brokerNumber(raw.buy_price),payout:brokerNumber(raw.payout),profit:brokerNumber(raw.profit),bid_price:brokerNumber(raw.bid_price),current_spot:brokerNumber(raw.current_spot),entry_tick:brokerNumber(raw.entry_spot)??brokerNumber(raw.entry_tick),exit_tick:brokerNumber(raw.exit_spot)??brokerNumber(raw.exit_tick),date_settlement:brokerNumber(raw.date_settlement),is_sold:brokerNumber(raw.is_sold),is_valid_to_sell:brokerNumber(raw.is_valid_to_sell),tick_count:brokerNumber(raw.tick_count)} as OpenContract;
 
         onUpdate?.(c);
         if (c.is_sold === 1 || ['sold','won','lost','cancelled'].includes(c.status)) {

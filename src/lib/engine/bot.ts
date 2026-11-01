@@ -22,6 +22,7 @@ export interface TradeRecord {
   durationUnit?: string;
   contractId?: number;
   signalEvidence?: SignalEvidence;
+  potentialPayout?:number;pipSize?:number;longcode?:string;buyTransactionId?:string;sellTransactionId?:string;dateExpiry?:number;
   /** Idempotency key: strategyId + version + monotonic trade index. */
   idempotencyKey: string;
   strategyId: string;
@@ -303,7 +304,7 @@ export class TradingBot {
     let reservedStake = 0;
     let record: TradeRecord;
     try {
-      this.emit('pricing','Requesting a fresh broker proposal.',{contractType:leg.contractType,barrier:leg.barrier,stake:decision.stake,contractId:undefined,entryPrice:undefined,exitPrice:undefined,contractValue:undefined,profit:undefined});
+      this.emit('pricing','Requesting a fresh broker proposal.',{contractType:leg.contractType,barrier:leg.barrier,stake:decision.stake,contractId:undefined,entryPrice:undefined,exitPrice:undefined,contractValue:undefined,profit:undefined,potentialPayout:undefined,currentSpot:undefined,pipSize:undefined,longcode:undefined,dateStart:undefined,dateExpiry:undefined,canSell:undefined,recordedTicks:undefined,totalTicks:undefined,buyTransactionId:undefined,sellTransactionId:undefined,brokerStatus:undefined});
       const priced = await this.provider.price({
         symbol: this.strategy.market,
         contractType: leg.contractType,
@@ -349,6 +350,7 @@ export class TradingBot {
         symbol: this.strategy.market,
         contractType: leg.contractType,
         barrier: priced.barrier,
+        potentialPayout:settled.potentialPayout,pipSize:settled.pipSize,longcode:settled.longcode,buyTransactionId:settled.buyTransactionId,sellTransactionId:settled.sellTransactionId,dateExpiry:settled.dateExpiry,
         stake: settled.stake,
         payout: settled.payout,
         profit: settled.profit,

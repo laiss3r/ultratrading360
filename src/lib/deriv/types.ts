@@ -62,6 +62,8 @@ export interface Proposal {
 }
 
 export interface OpenContract {
+  tick_count?: number;
+  tick_stream?: unknown[];
   bid_price?: number;
   date_settlement?: number;
   contract_id: number;

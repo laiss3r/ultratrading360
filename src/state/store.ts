@@ -194,7 +194,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
   balanceStatus: 'stale',
   balanceMessage: 'Balances are last known until a live update arrives.',
   rankings: [],
-  runPanelOpen: true,
+  runPanelOpen: false,
   runPanelTab: 'summary',
   botRuns: 0,
   quickStrategyOpen: false,
@@ -367,7 +367,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
         get().stopBalanceStream();
         get().stopBot('session ended');
         get().provider?.disconnect();
-        set({ session: null, accounts: [] });
+        set({ session: null, accounts: [],runPanelOpen:false });
         if (notify && j.reason) {
           get().pushLog(
             'warn',
@@ -493,7 +493,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
     } catch {
       /* best effort */
     }
-    set({ session: null, accounts: [] });
+    set({ session: null, accounts: [],runPanelOpen:false });
     try { localStorage.removeItem(PREF_LOGINID); } catch { /* private mode */ }
     get().pushLog('warn', 'Disconnected. The local session cookie was cleared; revoke the token at Deriv if you want it dead server-side.');
     await get().applyMode('deriv_demo', false);
@@ -936,7 +936,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
       },
     }, startingBalance, {accountLoginid:get().session?.loginid});
 
-    set({ bot, risk, riskSnapshot: risk.getSnapshot(), activeStrategyId: id, botState: 'starting', botDetail: '', botSignal:null, execution:null });
+    set({ bot, risk, riskSnapshot: risk.getSnapshot(), activeStrategyId: id, botState: 'starting', botDetail: '', botSignal:null, execution:null, runPanelOpen:true,runPanelTab:'summary' });
     try {
       await bot.start(800);
       if(bot.state!=='running')return {ok:false,message:'Bot start was cancelled or halted.'};

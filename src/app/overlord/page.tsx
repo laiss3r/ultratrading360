@@ -11,7 +11,6 @@ import { Button, Field, Notice, PageTitle, Panel, Empty, Toggle } from '@/compon
 import { OverlordDiscovery } from '@/components/OverlordDiscovery';
 import {volatilityMarkets,isAvailable} from '@/lib/overlord/discovery';
 import type {ActiveSymbol} from '@/lib/deriv/types';
-import { ExecutionConsole } from '@/components/ExecutionConsole';
 import { RunButton } from '@/components/Workspace';
 
 export default function OverlordPage() {
@@ -56,7 +55,7 @@ export default function OverlordPage() {
     <PageTitle eyebrow="CONFIGURE · OBSERVE · AUTOMATE" title="Overlord Pro" description="Signal-gated trading with live pattern validation, an optional recovery contract and capped stake progression."/>
     <Notice tone="warning">Entries wait for qualified live evidence and broker payout checks on the selected Demo or Real account. No signal guarantees a win. Martingale can increase losses rapidly; Real trades risk actual money.</Notice>
     {message && <Notice tone="error">{message}</Notice>}{savedMessage && <Notice tone="success">{savedMessage}</Notice>}
-    <Panel title="Bot session" subtitle="Summary, transactions and the actual execution journal"><ExecutionConsole runControl={<RunButton prepare={prepare}>Run bot</RunButton>}/></Panel>
+    <Panel title="Bot session" subtitle="The shared Summary, Transactions and Journal workspace expands automatically after Confirm & run."><div className="button-row"><RunButton prepare={prepare}>Run bot</RunButton><Button variant="secondary" onClick={()=>useApp.getState().setRunPanelOpen(true)}>Open trading session</Button></div><p className="micro muted">Collapsing the workspace never stops trading or clears history. Use Stop to block future buys.</p></Panel>
     <Panel title="Trading setup" subtitle="Choose your contract and an actual Deriv volatility market">
       <div className="form-grid">
         <Field label="Contract type"><select value={config.contractType} disabled={running} onChange={(e) => change({contractType:e.target.value as ContractType})}>{contractOptions}</select></Field>

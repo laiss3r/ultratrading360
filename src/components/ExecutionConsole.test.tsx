@@ -25,3 +25,13 @@ it('keeps actual session totals visible on Transactions and Journal, like the re
 it('renders supplied Run control when idle and only Stop when running',()=>{
  const {rerender}=render(<ExecutionConsole runControl={<button>Start selected bot</button>}/>);expect(screen.getByText('Start selected bot')).toBeTruthy();f.state.botState='running';rerender(<ExecutionConsole runControl={<button>Start selected bot</button>}/>);expect(screen.queryByText('Start selected bot')).toBeNull();expect(screen.getByRole('button',{name:'Stop bot'})).toBeTruthy();
 });
+it('shows an accepted open contract in Transactions without inventing settlement or resale status',()=>{
+ f.state.botState='running';f.state.execution={id:'open',runId:'run1',at:400,accountLoginid:'DOT_TEST',mode:'deriv_demo',phase:'open',detail:'Broker confirmed contract',symbol:'R_10',contractType:'DIGITEVEN',currency:'USD',duration:2,durationUnit:'t',contractId:8,stake:2,potentialPayout:3.8,entryPrice:123.4,currentSpot:123.5,pipSize:3};
+ render(<ExecutionConsole/>);expect(document.body.textContent).toContain('Resale availability not reported');expect(document.body.textContent).not.toContain('Resale not offered');expect(screen.getByText('Purchased runs').parentElement?.textContent).toContain('2');fireEvent.click(screen.getByRole('tab',{name:'Transactions'}));expect(document.body.textContent).toContain('123.400');expect(document.body.textContent).toContain('Open · pending settlement');expect(document.body.textContent).toContain('not settled');
+});
+it('does not count a proposal as an accepted transaction or turn potential payout into paid return',()=>{
+ f.state.execution={id:'pricing',runId:'new-run',at:400,accountLoginid:'DOT_TEST',mode:'deriv_demo',phase:'pricing',detail:'Checking payout',symbol:'R_10',contractType:'DIGITEVEN',currency:'USD',duration:1,durationUnit:'t',stake:2,potentialPayout:3.8};render(<ExecutionConsole/>);expect(screen.getByText('Purchased runs').parentElement?.textContent).toContain('0');expect(screen.getByText('Total payout').parentElement?.textContent).toContain('0.00');
+});
+it('opens prior transactions only for this account after view reset',()=>{
+ f.state.sessionResets={'deriv_demo:DOT_TEST':400};render(<ExecutionConsole/>);fireEvent.click(screen.getByRole('tab',{name:'Transactions'}));expect(document.body.textContent).not.toContain('9608.69');fireEvent.click(screen.getByRole('checkbox',{name:'Include prior sessions for this account'}));expect(document.body.textContent).toContain('9608.69');expect(document.body.textContent).not.toContain('999');
+});

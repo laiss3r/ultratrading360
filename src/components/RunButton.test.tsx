@@ -18,3 +18,8 @@ it('offers account-specific Real acknowledgement instead of silently turning it 
 it('never starts a bot when the permission/channel verification fails',async()=>{
  f.state.authorizeConfirmedRun=vi.fn(async()=>({ok:false,message:'Broker account was not verified'}));render(<RunButton strategyId="strategy"/>);fireEvent.click(screen.getByRole('button',{name:'Run strategy'}));fireEvent.click(screen.getByRole('button',{name:'Confirm & run'}));await screen.findByText('Broker account was not verified');expect(f.state.runStrategy).not.toHaveBeenCalled();
 });
+it('dismisses confirmation immediately on entering starting, without awaiting broker history',async()=>{
+ let finish!:(v:{ok:boolean;message:string})=>void;
+ f.state.runStrategy=vi.fn(()=>{f.state.botState='starting';f.state.runPanelOpen=true;return new Promise(r=>{finish=r;});});
+ render(<RunButton strategyId="strategy"/>);fireEvent.click(screen.getByRole('button',{name:'Run strategy'}));fireEvent.click(screen.getByRole('button',{name:'Confirm & run'}));await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());expect(f.state.runPanelOpen).toBe(true);finish({ok:true,message:'Started'});
+});

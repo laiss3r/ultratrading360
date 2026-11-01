@@ -5,6 +5,7 @@ import { runClassicDiscovery } from '@/lib/deriv/browserLegacyWs';
 import { useApp } from './store';
 import { DEFAULT_SETTINGS } from '@/lib/persistence/db';
 import * as persistence from '@/lib/persistence/db';
+import {TradingBot} from '@/lib/engine/bot';
 import { createStrategy } from '@/lib/engine/strategies';
 import type { AuthSession } from '@/lib/deriv/types';
 import { DerivProvider, type MarketProvider } from '@/lib/engine/provider';
@@ -188,3 +189,10 @@ it('keeps the working market provider if authenticated balance verification fail
 it('rejects an OTP response for another account before touching the existing market provider',async()=>{
  const previous={disconnect:vi.fn()} as unknown as MarketProvider;useApp.setState({session:{...real,isVirtual:true,loginid:'DOT1'},provider:previous});vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify({ok:true,url:'ws://fixture/OTHER',loginid:'OTHER',mode:'deriv_demo'}))));await useApp.getState().attachTradingSocket('deriv_demo');expect(previous.disconnect).not.toHaveBeenCalled();expect(useApp.getState().provider).toBe(previous);expect(useApp.getState().tradingMessage).toContain('mismatched');
 });
+
+ describe('global session opening at the execution boundary',()=>{
+ function setup(){const strategy=createStrategy();useApp.setState({session:real,tradingLoginid:real.loginid,strategies:[strategy],provider:{mode:'deriv_real',isConnected:()=>true} as MarketProvider,runPanelOpen:false,runPanelTab:'journal',settings:{...DEFAULT_SETTINGS,mode:'deriv_real',realTradingAcknowledged:true,acknowledgedAccountLoginid:real.loginid,limits:{...DEFAULT_SETTINGS.limits,tradingEnabled:true}}});return strategy;}
+ it('opens Summary synchronously after preflight, before broker start resolves',async()=>{const s=setup();let release!:()=>void;const spy=vi.spyOn(TradingBot.prototype,'start').mockImplementation(()=>new Promise<void>(resolve=>{release=resolve;}));try{const pending=useApp.getState().runStrategy(s.id);expect(useApp.getState().runPanelOpen).toBe(true);expect(useApp.getState().runPanelTab).toBe('summary');expect(useApp.getState().activeStrategyId).toBe(s.id);release();await pending;}finally{spy.mockRestore();}});
+ it('does not expand a rejected or mismatched account execution',async()=>{const s=setup();useApp.setState({tradingLoginid:'another-account'});expect((await useApp.getState().runStrategy(s.id)).ok).toBe(false);expect(useApp.getState().runPanelOpen).toBe(false);});
+ it('retains the open workspace and exposes an actual startup failure',async()=>{const s=setup();const spy=vi.spyOn(TradingBot.prototype,'start').mockRejectedValue(new Error('History channel failed'));try{expect((await useApp.getState().runStrategy(s.id)).ok).toBe(false);expect(useApp.getState().runPanelOpen).toBe(true);expect(useApp.getState().botDetail).toBe('History channel failed');expect(useApp.getState().botState).toBe('error');}finally{spy.mockRestore();}});
+ });

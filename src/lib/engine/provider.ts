@@ -29,6 +29,7 @@ export interface PricedContract {
 
 export interface SettledContract {
   won: boolean;
+  potentialPayout?:number;pipSize?:number;longcode?:string;buyTransactionId?:string;sellTransactionId?:string;dateExpiry?:number;
   contractId?: number;
   openedAt?: number;
   closedAt?: number;
@@ -238,12 +239,13 @@ export class DerivProvider implements MarketProvider {
       duration: context.duration, durationUnit: context.durationUnit, barrier: context.barrier,
     };
     const trade = await this.tradingSvc.buy(req, { authorized: opts.authorized, maxAcceptablePrice: priced.askPrice, shouldExecute: (proposal) => opts.shouldExecute?.({askPrice:proposal.ask_price,payout:proposal.payout}) ?? true, onBuying: () => opts.onUpdate?.({phase:'buying'}) });
-    opts.onUpdate?.({phase:'open',contractId:trade.contractId,stake:trade.buyPrice,potentialPayout:trade.payout});
-    const settled = await this.tradingSvc.watchContract(trade.contractId,(c)=>opts.onUpdate?.({phase:'open',contractId:trade.contractId,entryPrice:c.entry_tick,exitPrice:c.exit_tick,currentSpot:c.current_spot,contractValue:c.bid_price,profit:c.profit}));
+    opts.onUpdate?.({phase:'open',contractId:trade.contractId,stake:trade.buyPrice,potentialPayout:trade.payout,longcode:trade.longcode,pipSize:this.pipFor(priced.symbol),dateStart:trade.dateStart*1000,dateExpiry:trade.dateExpiry*1000,buyTransactionId:trade.transactionId});
+    const settled = await this.tradingSvc.watchContract(trade.contractId,(c)=>opts.onUpdate?.({phase:'open',contractId:trade.contractId,entryPrice:c.entry_tick,exitPrice:c.exit_tick,currentSpot:c.current_spot,contractValue:c.bid_price,profit:c.profit,canSell:c.is_valid_to_sell===0?false:c.is_valid_to_sell===1?true:undefined,recordedTicks:Array.isArray(c.tick_stream)?c.tick_stream.length:undefined,totalTicks:c.tick_count,buyTransactionId:c.transaction_ids?.buy===undefined?undefined:String(c.transaction_ids.buy),sellTransactionId:c.transaction_ids?.sell===undefined?undefined:String(c.transaction_ids.sell),brokerStatus:c.status}));
     if(!Number.isFinite(settled.profit))throw new Error('Broker settlement has no finite profit; reconcile this contract before restarting.');
     const profit=Number(settled.profit);
     return {
       won: profit > 0,
+      potentialPayout:trade.payout,pipSize:this.pipFor(priced.symbol),longcode:trade.longcode,dateExpiry:trade.dateExpiry*1000,buyTransactionId:settled.transaction_ids?.buy===undefined?trade.transactionId:String(settled.transaction_ids.buy),sellTransactionId:settled.transaction_ids?.sell===undefined?undefined:String(settled.transaction_ids.sell),
       contractId: trade.contractId,
       openedAt: trade.dateStart*1000,
       closedAt: settled.date_settlement?settled.date_settlement*1000:Date.now(),
