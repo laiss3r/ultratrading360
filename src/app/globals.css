@@ -20,3 +20,9 @@
 @media(max-width:360px){.confirm-dialog{padding:18px}.confirm-dialog .button-row{grid-template-columns:minmax(0,1fr)}}
 .modal-backdrop{width:100vw;height:100dvh;right:auto;bottom:auto}
 @media(max-width:380px){.topbar{display:grid;grid-template-columns:minmax(0,1fr) auto;padding:0 10px;gap:8px}.brand{min-width:0;font-size:9.5px;gap:6px}.brand-symbol{width:26px;height:30px;flex-shrink:0}.brand small{font-size:5px;letter-spacing:.75px}.top-actions{min-width:0}.theme-button{display:none}.account-trigger{min-width:0;width:128px}.account-trigger strong{font-size:12px}}
+
+/* Real market scanning: observed activity, never synthetic progress. */
+.scan-activity{display:flex;flex-direction:column;gap:10px;padding:16px;border:1px solid var(--border,#dce1eb);border-left:4px solid #263c91;border-radius:14px;min-width:0;background:rgba(38,60,145,.035)}
+.scan-activity strong{font-size:14px;overflow-wrap:anywhere}.scan-activity small,.scan-market-card small{font-size:11px;line-height:1.6;opacity:.78}.scan-activity progress{width:100%;height:7px;accent-color:#0aa58c}
+.scan-market-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:12px}
+.scan-market-card{display:flex;flex-direction:column;gap:8px;border:1px solid var(--border,#dce1eb);border-radius:14px;padding:14px;min-width:0}.scan-market-card.qualified{border-color:#0aa58c;box-shadow:inset 0 -3px #0aa58c}.scan-market-card header{display:flex;align-items:center;justify-content:space-between;gap:8px}.scan-market-card header strong{font-size:13px;overflow-wrap:anywhere}.scan-market-card p{margin:0}.scan-market-card .button{align-self:flex-start;margin-top:auto}.scan-digits{font-variant-numeric:tabular-nums;font-size:14px;letter-spacing:1.5px;overflow-wrap:anywhere;color:inherit}

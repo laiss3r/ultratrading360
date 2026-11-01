@@ -53,7 +53,7 @@ export class MarketDataService {
    * Historical ticks. Returns quotes paired with epochs and the instrument's pip_size,
    * which is required for correct digit extraction.
    */
-  async ticksHistory(symbol: string, count = 1000, signal?: AbortSignal): Promise<{ ticks: Tick[]; pipSize: number }> {
+  async ticksHistory(symbol: string, count = 1000, signal?: AbortSignal, onProgress?: (loaded:number,total:number)=>void): Promise<{ ticks: Tick[]; pipSize: number }> {
     if (!Number.isInteger(count) || count < 1 || count > 5000) throw new Error('Tick history count must be between 1 and 5000.');
     // The current public API can silently cap a response at 1,000 rows, even
     // when count=5000. Page backwards by the broker epoch, never fabricate rows.
@@ -68,6 +68,7 @@ export class MarketDataService {
     };
     const first = await page('latest', Math.min(count, 1000));
     let ticks = first.ticks;
+    onProgress?.(Math.min(count,ticks.length),count);
     for (let attempts = 0; ticks.length < count && ticks.length && attempts < 5; attempts++) {
       const oldest = ticks[0].epoch;
       const older = await page(String(oldest - 1), Math.min(count - ticks.length, 1000));
@@ -75,6 +76,7 @@ export class MarketDataService {
       if (!older.ticks.length) break;
       if (older.ticks.some((tick) => tick.epoch >= oldest)) throw new Error('Broker did not honour the historical page boundary.');
       ticks = [...older.ticks, ...ticks];
+      onProgress?.(Math.min(count,ticks.length),count);
     }
     if (count > 1000) {
       // Paging old data must not leave the seed stale before streaming starts.

@@ -13,7 +13,8 @@ it('pages the genuine 1,000-row cap to 5,000 and refreshes the newest seed',asyn
   const count=Number(request.count);const times=Array.from({length:count},(_,i)=>end-count+i+1);
   return {pip_size:2,history:{times,prices:times.map((t)=>100+t/100)}};
  });
- const service=new MarketDataService({send} as unknown as DerivClient,0);const result=await service.ticksHistory('R_10',5000);
+ const service=new MarketDataService({send} as unknown as DerivClient,0);const progress=vi.fn();const result=await service.ticksHistory('R_10',5000,undefined,progress);
+ expect(progress.mock.calls).toEqual([[1000,5000],[2000,5000],[3000,5000],[4000,5000],[5000,5000]]);
  expect(send).toHaveBeenCalledTimes(6);expect(send.mock.calls[1][0].end).toBe('9000');expect(send.mock.calls[4][0].end).toBe('6000');expect(send.mock.calls[5][0].end).toBe('latest');
  expect(result.ticks).toHaveLength(5000);expect(result.ticks[0].epoch).toBe(5003);expect(result.ticks.at(-1)?.epoch).toBe(10002);expect(result.pipSize).toBe(2);
  expect(result.ticks.every((tick,i,a)=>i===0||tick.epoch===a[i-1].epoch+1)).toBe(true);
