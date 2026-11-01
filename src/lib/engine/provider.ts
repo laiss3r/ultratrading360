@@ -1,4 +1,4 @@
-import type { AccountMode, Tick } from '../deriv/types';
+import type { AccountMode, Tick, OpenContract } from '../deriv/types';
 import { DerivClient } from '../deriv/client';
 import { MarketDataService } from '../deriv/market';
 import { ContractService, type ContractType } from '../deriv/contracts';
@@ -224,6 +224,12 @@ export class DerivProvider implements MarketProvider {
     };
     this.pricedRequests.set(priced, Object.freeze({ ...req }));
     return priced;
+  }
+
+  async inspectContract(contractId:number):Promise<OpenContract>{
+    if(!this.isConnected())throw Error('Reconnect the authenticated account channel first.');
+    const frame=await this.client.send<{proposal_open_contract:OpenContract}>({proposal_open_contract:1,contract_id:contractId});
+    return frame.proposal_open_contract;
   }
 
   async execute(priced: PricedContract, opts: ExecuteOptions): Promise<SettledContract> {

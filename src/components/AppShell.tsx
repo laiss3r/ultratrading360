@@ -11,6 +11,7 @@ import { TradingSession } from './TradingSession';
 const navigation = [
   { href: '/', label: 'Dashboard', Icon: LayoutDashboard },
   { href: '/builder', label: 'Bot Builder', Icon: Blocks },
+  { href: '/elite', label: 'Elite Prime Pro', Icon: Radio },
   { href: '/overlord', label: 'Overlord Pro', Icon: Bot },
   { href: '/signals', label: 'Signal Tools', Icon: Radio },
   { href: '/chart', label: 'Trading Chart', Icon: ChartNoAxesCombined },
@@ -41,6 +42,6 @@ export function AppShell({ children }: { children: ReactNode }) {
     </div>
     {!simple&&<TradingSession/>}
     <footer className="site-footer"><span><ShieldCheck size={13} />Connected to Deriv infrastructure</span><span>Trading involves risk. No guaranteed returns.</span><a href="https://developers.deriv.com/" target="_blank" rel="noreferrer"><CircleHelp size={13} />API documentation ↗</a></footer>
-    {!simple && <nav className="mobile-nav" aria-label="Mobile navigation">{[{href:'/',label:'Home',Icon:LayoutDashboard},{href:'/builder',label:'Builder',Icon:Blocks},{href:'/overlord',label:'Bots',Icon:Bot},{href:'/signals',label:'Signals',Icon:Radio},{href:'/connect',label:'Account',Icon:Wallet}].map(({href,label,Icon}) => <Link href={href} key={href} aria-current={pathname===href?'page':undefined}><Icon size={19}/><span>{label}</span></Link>)}</nav>}
+    {!simple && <nav className="mobile-nav" aria-label="Mobile navigation">{[{href:'/',label:'Home',Icon:LayoutDashboard},{href:'/builder',label:'Builder',Icon:Blocks},{href:'/overlord',label:'Bots',Icon:Bot},{href:'/elite',label:'Elite Pro',Icon:Radio},{href:'/connect',label:'Account',Icon:Wallet}].map(({href,label,Icon}) => <Link href={href} key={href} aria-current={pathname===href?'page':undefined}><Icon size={19}/><span>{label}</span></Link>)}</nav>}
   </div>;
 }

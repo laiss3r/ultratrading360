@@ -196,3 +196,11 @@ it('rejects an OTP response for another account before touching the existing mar
  it('does not expand a rejected or mismatched account execution',async()=>{const s=setup();useApp.setState({tradingLoginid:'another-account'});expect((await useApp.getState().runStrategy(s.id)).ok).toBe(false);expect(useApp.getState().runPanelOpen).toBe(false);});
  it('retains the open workspace and exposes an actual startup failure',async()=>{const s=setup();const spy=vi.spyOn(TradingBot.prototype,'start').mockRejectedValue(new Error('History channel failed'));try{expect((await useApp.getState().runStrategy(s.id)).ok).toBe(false);expect(useApp.getState().runPanelOpen).toBe(true);expect(useApp.getState().botDetail).toBe('History channel failed');expect(useApp.getState().botState).toBe('error');}finally{spy.mockRestore();}});
  });
+it('refreshed Elite pending receipts prevent history/risk/reset bypass even without an in-memory bot',async()=>{
+  const event:import('@/lib/engine/execution').ExecutionEvent={id:'pending',tool:'elite',operationId:'rule:R_10',runId:'elite_test',at:100,accountLoginid:'ROT1',mode:'deriv_real',phase:'halted',detail:'Pending',symbol:'R_10',contractType:'DIGITEVEN',duration:1,durationUnit:'t',currency:'USD',contractId:123,stake:1,purchaseSubmitted:true,outcomeUnresolved:true};
+  useApp.setState({session:real,settings:{...useApp.getState().settings,mode:'deriv_real'},bot:null,botState:'idle',executionJournal:[event]});
+  const reset=vi.spyOn(useApp.getState().risk,'resetSession');
+  expect((await useApp.getState().resetSessionView()).ok).toBe(false);
+  await expect(useApp.getState().clearTrades()).rejects.toThrow(/settlement/);
+  useApp.getState().resetRisk();expect(reset).not.toHaveBeenCalled();reset.mockRestore();
+});

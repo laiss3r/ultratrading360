@@ -44,8 +44,8 @@ export interface TradeRecord {
   mode: AccountMode;
   /** Provenance of the numbers: every contract here was executed through Deriv. */
   source: 'deriv_live';
-  balanceBefore: number;
-  balanceAfter: number;
+  balanceBefore?: number;
+  balanceAfter?: number;
   riskReasons: string[];
   gateReasons: string[];
   error?: string;

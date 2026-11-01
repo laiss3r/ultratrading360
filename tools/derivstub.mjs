@@ -28,12 +28,13 @@ const CLASSIC_LIST = [
 const tradeLog = [];
 const proposals = new Map();
 const contracts = new Map();
+const terminalContracts = new Map();
 let proposalIndex = 0, contractIndex = 0;
 let getCalls = 0;
 http
   .createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
-    if (process.env.STUB_TRADING === '1' && url.pathname === '/__fixture/reset' && req.method === 'POST') {tradeLog.length=0;proposals.clear();contracts.clear();proposalIndex=0;contractIndex=0;res.writeHead(200);return res.end('{}');}
+    if (process.env.STUB_TRADING === '1' && url.pathname === '/__fixture/reset' && req.method === 'POST') {tradeLog.length=0;proposals.clear();contracts.clear();terminalContracts.clear();proposalIndex=0;contractIndex=0;res.writeHead(200);return res.end('{}');}
     if (process.env.STUB_TRADING === '1' && url.pathname === '/__fixture/trades') { res.writeHead(200, {'content-type':'application/json'}); return res.end(JSON.stringify(tradeLog)); }
     if (url.pathname === '/trading/v1/options/legacy/migration-status') {res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({status:process.env.STUB_MIGRATION || 'complete'}));}
     if (url.pathname === '/trading/v1/options/legacy/accounts') {if(['pending','failed'].includes(process.env.STUB_MIGRATION)){res.writeHead(409,{'content-type':'application/json'});return res.end(JSON.stringify({errors:[{status:409,code:'MigrationPending',message:'User migration is pending or has failed'}]}));}res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({loginids:{CR_FIXTURE:[{account_id:123,currency:'USD'}]}}));}
@@ -107,9 +108,14 @@ market.on('connection', (ws, req) => {
       return ws.send(JSON.stringify({req_id:m.req_id,msg_type:'buy',buy:{contract_id:id,buy_price:proposal.amount,payout:Math.round(proposal.amount*1.95*100)/100,longcode:'Synthetic fixture only',currency:proposal.currency,start_time:Math.floor(Date.now()/1000)}}));
     }
     if (process.env.STUB_TRADING === '1' && m.proposal_open_contract) {
-      const proposal=contracts.get(m.contract_id);const won=m.contract_id>2;const profit=won?Math.round(proposal.amount*.95*100)/100:-proposal.amount;
-      const frame={req_id:m.req_id,msg_type:'proposal_open_contract',subscription:{id:`fixture-contract-${m.contract_id}`},proposal_open_contract:{contract_id:m.contract_id,is_sold:0,status:'open',buy_price:String(proposal.amount),profit:'0.00',bid_price:'0.00',payout:String(Math.round(proposal.amount*1.95*100)/100),entry_spot:'100.01',currency:proposal.currency}};ws.send(JSON.stringify(frame));
-      setTimeout(()=>{if(ws.readyState!==1)return;fixtureBalance=Math.round((fixtureBalance+profit)*100)/100;ws.send(JSON.stringify({...frame,proposal_open_contract:{...frame.proposal_open_contract,is_sold:1,status:won?'won':'lost',profit:String(profit),bid_price:String(proposal.amount+profit),exit_spot:'100.08',date_settlement:Math.floor(Date.now()/1000)}}));if(balanceReq)ws.send(JSON.stringify({req_id:balanceReq.req_id,subscription:{id:'balance'},balance:{balance:process.env.STUB_STRING_BALANCE==='1'?fixtureBalance.toFixed(2):fixtureBalance,currency:'USD'}}));},Number(process.env.STUB_SETTLE_MS||350));return;
+      const proposal=contracts.get(m.contract_id);
+      if(!proposal)return ws.send(JSON.stringify({req_id:m.req_id,error:{code:'ContractNotFound',message:'No such fixture contract'}}));
+      const won=m.contract_id>2,profit=won?Math.round(proposal.amount*.95*100)/100:-proposal.amount;
+      const open={contract_id:m.contract_id,is_sold:0,status:'open',buy_price:String(proposal.amount),profit:'0.00',bid_price:'0.00',payout:String(Math.round(proposal.amount*1.95*100)/100),entry_spot:'100.01',currency:proposal.currency};
+      const current=terminalContracts.get(m.contract_id)??open;
+      const frame={req_id:m.req_id,msg_type:'proposal_open_contract',...(m.subscribe?{subscription:{id:`fixture-contract-${m.contract_id}`}}:{}),proposal_open_contract:current};ws.send(JSON.stringify(frame));
+      if(!m.subscribe||current.is_sold)return;
+      setTimeout(()=>{const terminal={...open,is_sold:1,status:won?'won':'lost',profit:String(profit),bid_price:String(proposal.amount+profit),exit_spot:'100.08',date_settlement:Math.floor(Date.now()/1000)};terminalContracts.set(m.contract_id,terminal);fixtureBalance=Math.round((fixtureBalance+profit)*100)/100;if(ws.readyState!==1)return;ws.send(JSON.stringify({...frame,proposal_open_contract:terminal}));if(balanceReq)ws.send(JSON.stringify({req_id:balanceReq.req_id,subscription:{id:'balance'},balance:{balance:process.env.STUB_STRING_BALANCE==='1'?fixtureBalance.toFixed(2):fixtureBalance,currency:'USD'}}));},Number(process.env.STUB_SETTLE_MS||350));return;
     }
     if (process.env.STUB_TRADING === '1' && m.contracts_for) return ws.send(JSON.stringify({req_id:m.req_id,msg_type:'contracts_for',contracts_for:{available:['DIGITEVEN','DIGITODD','DIGITOVER','DIGITUNDER'].map(contract_type=>({contract_type,contract_category:'digits',min_contract_duration:'1t',max_contract_duration:'10t',...(contract_type==='DIGITOVER'?{last_digit_range:[0,1,2,3,4,5,6,7,8]}:contract_type==='DIGITUNDER'?{last_digit_range:[1,2,3,4,5,6,7,8,9]}:{})}))}}));
     if (process.env.STUB_TRADING === '1' && m.ticks_history) {

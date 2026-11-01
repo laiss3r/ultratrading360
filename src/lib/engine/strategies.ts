@@ -1,3 +1,5 @@
+import type {EliteConfig} from '../elite/config';
+import {validateElite} from '../elite/config';
 import { validateLeg, type ContractRotation } from './rotation';
 import type { ConditionGroup } from './conditions';
 import type { ProgressionConfig } from './progressions';
@@ -7,6 +9,7 @@ import { ContractService } from '../deriv/contracts';
 import { DEFAULT_RECOVERY, DEFAULT_RISK_LIMITS, type RecoveryConfig, type RiskLimits } from './risk';
 
 export interface Strategy {
+  elite?:EliteConfig;
   id: string;
   name: string;
   /** Monotonic. Bumped on every save so a running bot never silently changes behaviour. */
@@ -73,7 +76,7 @@ export function createStrategy(partial: Partial<Strategy> = {}): Strategy {
     progression: partial.progression,
     contractRotation: partial.contractRotation,
     signalGate: partial.signalGate,
-    notes: partial.notes,
+    notes: partial.notes,elite:partial.elite,
   };
 }
 
@@ -86,6 +89,7 @@ export interface StrategyValidation {
 export function validateStrategy(s: Strategy): StrategyValidation {
   const errors: string[] = [];
   const warnings: string[] = [];
+  if(s.elite)errors.push(...validateElite(s.elite));
   if((s.signalGate||s.name.startsWith('Overlord ·')) && ((s.signalGate&&s.signalGate.version!==1) || s.durationUnit!=='t' || s.duration>10)) errors.push('Signal-gated strategies require policy v1 and 1–10 tick duration.');
 
   if (!s.name.trim()) errors.push('Strategy needs a name.');

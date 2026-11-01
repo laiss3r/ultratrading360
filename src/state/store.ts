@@ -10,6 +10,10 @@ import type { AccountMode, ActiveSymbol, AuthSession } from '@/lib/deriv/types';
 import { DERIV_APP_ID } from '@/lib/deriv/config';
 import { DerivProvider, type MarketProvider, type Quote } from '@/lib/engine/provider';
 import { RiskManager, type RiskSnapshot } from '@/lib/engine/risk';
+import {OrderCancelledError} from '@/lib/deriv/trading';
+import {checkpointEliteEvent,checkpointEliteTrade,clearEliteCheckpoint,loadEliteCheckpoint,mergeEliteTrades} from '@/lib/elite/checkpoint';
+import {EliteBot} from '@/lib/elite/engine';
+import {pendingEliteEvents,terminalBrokerResult,recoveredTrade} from '@/lib/elite/reconcile';
 import { TradingBot, type BotState, type TradeRecord } from '@/lib/engine/bot';
 import { createStrategy, effectiveStrategyLimits, validateStrategy, type Strategy } from '@/lib/engine/strategies';
 import { computeMetrics, type PerformanceMetrics } from '@/lib/metrics';
@@ -82,7 +86,7 @@ interface State {
 
   strategies: Strategy[];
   activeStrategyId: string | null;
-  bot: TradingBot | null;
+  bot: TradingBot | EliteBot | null;
   botState: BotState;
   botDetail: string;
   execution: ExecutionEvent|null;
@@ -209,8 +213,11 @@ export const useApp = create<State & Actions>()((set, get) => ({
     const readSettingsRevision = settingsRevision;
     const storedSettings = await loadSettings();
     const strategies = await listStrategies();
-    const trades = await listTrades();
-    const executionJournal=await loadExecutionJournal();
+    const checkpoint=loadEliteCheckpoint();
+    const trades = mergeEliteTrades(checkpoint.trades,await listTrades());
+    const journal=await loadExecutionJournal();
+    const journalById=new Map<string,ExecutionEvent>();for(const e of [...checkpoint.events,...journal].sort((a,b)=>b.at-a.at)){if(!journalById.has(e.id))journalById.set(e.id,e);}
+    const executionJournal=[...journalById.values()];
     const sessionResets=await loadSessionResets();
     const settings = revision===identityRevision() && readSettingsRevision===settingsRevision?storedSettings:get().settings;
     const risk = new RiskManager(settings.limits, settings.recovery, 0);
@@ -503,7 +510,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
    *  The choice is persisted server-side (session cookie) AND as a local pref, so
    *  every route, reload and tab agrees on the active account. */
   async selectAccount(loginid: string, opts?: { silent?: boolean }): Promise<{ ok: boolean; message: string }> {
-    if (get().bot?.hasPendingOrder() || ['starting', 'running', 'paused', 'stopping'].includes(get().botState)) return { ok: false, message: 'Stop the bot before switching accounts.' };
+    if (get().bot?.hasPendingOrder() || pendingEliteEvents(get().executionJournal,get().trades,get().session?.loginid,get().settings.mode).length || ['starting', 'running', 'paused', 'stopping'].includes(get().botState)) return { ok: false, message: 'Stop the bot before switching accounts.' };
     const acct = get().accounts.find((a) => a.loginid === loginid);
     if (!acct) return { ok: false, message: 'Unknown account. Sync balances or sign in again.' };
     if (get().busy&&get().busy!=='sync-balances') return { ok: false, message: 'Another account operation is in progress.' };
@@ -899,13 +906,17 @@ export const useApp = create<State & Actions>()((set, get) => ({
       return { ok: false, message: 'A bot is already running. Stop it first — only one bot runs at a time to prevent duplicate orders.' };
     }
 
+    if(pendingEliteEvents(get().executionJournal,get().trades,get().session?.loginid,mode).length)return {ok:false,message:'An Elite broker outcome is still unresolved. Reconcile the session before starting any bot.'};
     const startingBalance = get().session?.balance ?? 0;
     const risk = new RiskManager(effectiveStrategyLimits(get().settings.limits, s), s.progression ? { ...s.recovery, enabled: false } : s.recovery, startingBalance);
 
-    const bot = new TradingBot(s, provider, risk, {
+    const accountAtRun=get().session!.loginid;
+    const Bot=s.elite?EliteBot:TradingBot;
+    const bot = new Bot(s, provider, risk, {
       onSignal:(e)=>set({botSignal:e}),
       onExecution:(e)=>{
-        const previous=get().execution;
+        if(e.tool==='elite'){try{checkpointEliteEvent(e);}catch{get().pushLog('error','Elite receipt checkpoint could not be saved. New buys are blocked; keep this tab open to reconcile.');if(e.phase==='buying')throw new OrderCancelledError();if(e.phase==='open')get().stopBot('Receipt durability failed; accepted contracts must settle before closing.');}}
+        const previous=e.operationId?get().executionJournal.find(previous=>previous.runId===e.runId&&previous.operationId===e.operationId):get().execution;
         set({execution:e});
         if(previous?.phase!==e.phase||previous?.contractId!==e.contractId||previous?.detail!==e.detail){
           set({executionJournal:[e,...get().executionJournal].slice(0,500)});
@@ -920,6 +931,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
         set({ riskSnapshot: risk.getSnapshot() });
       },
       onTrade: (t) => {
+        if(t.runId?.startsWith('elite_')){try{checkpointEliteTrade(t);}catch{get().pushLog('warn','Settled trade checkpoint failed; export history before closing this tab.');}}
         void appendTrades([t]).catch(()=>get().pushLog('warn','Trade persistence failed; export the current broker result.'));
         const trades = [t, ...get().trades].slice(0, 5000);
         set({ trades, metrics: computeMetrics(trades, startingBalance), riskSnapshot: risk.getSnapshot() });
@@ -934,7 +946,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
       onRisk: (d) => {
         if (!d.allowed && d.reasons.length) get().pushLog('warn', `Risk manager refused a trade: ${d.reasons.join(' ')}`);
       },
-    }, startingBalance, {accountLoginid:get().session?.loginid});
+    }, startingBalance, {accountLoginid:get().session?.loginid,canExecute:()=>get().provider===provider&&get().session?.loginid===accountAtRun&&get().tradingLoginid===accountAtRun&&get().settings.limits.tradingEnabled&&(mode!=='deriv_real'||(get().settings.realTradingAcknowledged&&get().settings.acknowledgedAccountLoginid===accountAtRun))});
 
     set({ bot, risk, riskSnapshot: risk.getSnapshot(), activeStrategyId: id, botState: 'starting', botDetail: '', botSignal:null, execution:null, runPanelOpen:true,runPanelTab:'summary' });
     try {
@@ -964,8 +976,30 @@ export const useApp = create<State & Actions>()((set, get) => ({
     }
   },
 
+  async reconcileEliteSession(){
+    const s=get(),account=s.session?.loginid,provider=s.provider;
+    if(!account||!(provider instanceof DerivProvider)||s.tradingLoginid!==account)return {ok:false,message:'Reconnect the selected account’s verified trading channel first.'};
+    if(['starting','running','paused'].includes(s.botState))return {ok:false,message:'Stop the bot before reconciling outstanding broker contracts.'};
+    const pending=pendingEliteEvents(s.executionJournal,s.trades,account,s.settings.mode);let resolved=0,unresolved=0;
+    for(const event of pending){
+      if(!event.contractId){unresolved++;continue;}
+      try{
+        const raw=await provider.inspectContract(event.contractId);
+        if(get().session?.loginid!==account||get().provider!==provider)return {ok:false,message:'Account changed during reconciliation; no result applied.'};
+        const result=terminalBrokerResult(event,raw);if(!result){unresolved++;continue;}
+        if(!(s.bot instanceof EliteBot&&s.bot.runId===event.runId&&s.bot.reconcileContract(event.contractId,result))){
+          const record=recoveredTrade(event,result);checkpointEliteTrade(record);if(!get().trades.some(t=>t.contractId===record.contractId&&t.accountLoginid===account&&t.mode===record.mode)){await appendTrades([record]);set({trades:[record,...get().trades].slice(0,5000)});}
+          const reconciled:ExecutionEvent={...event,id:`reconciled:${Date.now()}:${event.contractId}`,at:Date.now(),phase:'settled',outcomeUnresolved:false,profit:result.profit,contractValue:result.payout,entryPrice:result.entryPrice,exitPrice:result.exitPrice,detail:'Actual terminal broker contract reconciled; no order placed.'};
+          checkpointEliteEvent(reconciled);await appendExecutionEvent(reconciled);set({execution:reconciled,executionJournal:[reconciled,...get().executionJournal].slice(0,500)});
+        }
+        resolved++;
+      }catch{unresolved++;}
+    }
+    return {ok:unresolved===0,message:`${resolved} broker contracts reconciled; ${unresolved} still unresolved. ${pending.some(e=>!e.contractId)?'A buy without a returned contract ID cannot be safely inferred; verify it with Deriv. No automatic retry is allowed.':''}`};
+  },
+
   async resetSessionView(){
-    if(get().bot?.hasPendingOrder()||['starting','running','paused','stopping'].includes(get().botState))return {ok:false,message:'Stop the bot and wait for its contract before resetting.'};
+    if(get().bot?.hasPendingOrder()||pendingEliteEvents(get().executionJournal,get().trades,get().session?.loginid,get().settings.mode).length||['starting','running','paused','stopping'].includes(get().botState))return {ok:false,message:'Stop the bot and wait for or reconcile its contracts before resetting.'};
     const key=`${get().settings.mode}:${get().session?.loginid??'none'}`;
     const resets={...get().sessionResets,[key]:Date.now()};
     set({sessionResets:resets,execution:null,botSignal:null,bot:null,botState:'idle',botDetail:''});
@@ -973,9 +1007,9 @@ export const useApp = create<State & Actions>()((set, get) => ({
   },
 
   async clearTrades(): Promise<void> {
-    if(get().bot?.hasPendingOrder()||['starting','running','paused','stopping'].includes(get().botState))throw new Error('Stop the bot and wait for settlement before clearing history.');
+    if(get().bot?.hasPendingOrder()||pendingEliteEvents(get().executionJournal,get().trades,get().session?.loginid,get().settings.mode).length||['starting','running','paused','stopping'].includes(get().botState))throw new Error('Stop the bot and wait for settlement or reconcile pending contracts before clearing history.');
     const { clearTrades } = await import('@/lib/persistence/db');
-    await clearTrades();
+    await clearTrades();clearEliteCheckpoint();
     // Resetting the stats also resets the run counter, exactly as Deriv Bot's
     // Reset button does — "No. of runs" is defined as runs since the last clear.
     const base = get().session?.balance ?? 0;
@@ -997,6 +1031,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
   },
 
   resetRisk() {
+    if(get().bot?.hasPendingOrder()||pendingEliteEvents(get().executionJournal,get().trades,get().session?.loginid,get().settings.mode).length||['starting','running','paused','stopping'].includes(get().botState)){get().pushLog('warn','Stop and settle all contracts before resetting session risk.');return;}
     get().risk.resetSession();
     set({ riskSnapshot: get().risk.getSnapshot() });
     get().pushLog('info', 'Session risk counters reset.');
@@ -1004,6 +1039,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
 }));
 
 interface Actions {
+  reconcileEliteSession:()=>Promise<{ok:boolean;message:string}>;
   resetSessionView: () => Promise<{ok:boolean;message:string}>;
   hydrate: () => Promise<void>;
   loadConfig: () => Promise<void>;
