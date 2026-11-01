@@ -106,8 +106,8 @@ export async function discoverClassicAccounts(
 /**
  * Full browser-side discovery run: consume the single-use handoff marker, read
  * the classic account list (with live balances) from Deriv's legacy socket, and
- * adopt the rows server-side. Shared by the callback page (every sign-in) and
- * the switcher's "Sync balances" action. Returns what the session now holds.
+ * adopt the rows server-side. Compatibility helper only; current OAuth login and account refresh do not
+ * invoke this path. Returns what the session now holds.
  */
 export async function runClassicDiscovery(): Promise<{
   ok: boolean;

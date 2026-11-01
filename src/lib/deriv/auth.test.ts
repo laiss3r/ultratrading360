@@ -49,14 +49,14 @@ describe('validateAccountsForToken', () => {
     const err = await validateAccountsForToken('a-valid-looking-token', 'oauth').catch((e) => e);
     expect(err).toBeInstanceOf(DerivAuthError);
     expect((err as DerivAuthError).code).toBe('no_accounts');
-    // One REST call only: the new WebSocket has no authorize call, so no fallback hop.
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // Accounts plus two bounded, read-only migration checks; no legacy socket hop.
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it('accepts a missing accounts key as empty rather than crashing', async () => {
+  it('separates malformed responses from genuine empty listings', async () => {
     stubAccountsJson({ data: {} });
     const err = await validateAccountsForToken('a-valid-looking-token', 'oauth').catch((e) => e);
-    expect((err as DerivAuthError).code).toBe('no_accounts');
+    expect((err as DerivAuthError).code).toBe('account_response_invalid');
   });
 
   it('returns the listing untouched when accounts exist', async () => {

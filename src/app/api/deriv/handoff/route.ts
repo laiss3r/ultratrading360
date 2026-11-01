@@ -25,7 +25,7 @@ export async function POST() {
   const marker = store.get(HANDOFF_COOKIE)?.value;
   const raw = store.get(SESSION_COOKIE)?.value;
   const session = raw ? decryptSession(raw) : null;
-  const allowed = Boolean(session?.accessToken && (!session.expiresAt || session.expiresAt > Date.now()) && marker && verifySignedValue(marker));
+  const allowed = Boolean(session?.kind === 'pat' && session.accountRows?.some((a)=>/^(CR|VRT|VRD)/.test(a.account_loginid)) && session?.accessToken && (!session.expiresAt || session.expiresAt > Date.now()) && marker && verifySignedValue(marker));
 
   const res = NextResponse.json(
     allowed

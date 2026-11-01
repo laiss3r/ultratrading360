@@ -21,11 +21,19 @@ describe('rebuilt account menu',()=>{
 });
 
 describe('automatic discovery for existing Demo-only sessions',()=>{
-  it('checks additional sources once without asking the user to log in again',()=>{
-    f.state.accounts=[demo];const view=render(<AccountMenu/>);expect(f.state.syncBalances).toHaveBeenCalledTimes(1);
-    f.state.session={...demo,balance:9999};view.rerender(<AccountMenu/>);expect(f.state.syncBalances).toHaveBeenCalledTimes(1);expect(f.state.startOAuth).not.toHaveBeenCalled();
+  it('does not restart discovery just because only Demo was returned',()=>{
+    f.state.accounts=[demo];const view=render(<AccountMenu/>);expect(f.state.syncBalances).not.toHaveBeenCalled();
+    f.state.session={...demo,balance:9999};view.rerender(<AccountMenu/>);expect(f.state.syncBalances).not.toHaveBeenCalled();expect(f.state.startOAuth).not.toHaveBeenCalled();
   });
   it('shows an honest in-progress state instead of claiming Real does not exist',()=>{
     f.state.accounts=[demo];f.state.busy='sync-balances';render(<AccountMenu/>);open();expect(screen.getByText(/Checking Deriv for additional accounts/)).toBeTruthy();
   });
+});
+
+it('never presents a credential-only session as Demo 0.00',()=>{
+ f.state.session={...demo,loginid:'',balance:0,needsOptionsAccount:true};f.state.accounts=[];
+ render(<AccountMenu/>);expect(screen.getByText('Deriv connected')).toBeTruthy();expect(screen.getByText('No account selected')).toBeTruthy();expect(screen.queryByText('Demo account')).toBeNull();expect(screen.queryByText('0.00')).toBeNull();open();expect(screen.queryByRole('menuitemradio')).toBeNull();expect(f.state.syncBalances).not.toHaveBeenCalled();
+});
+it('distinguishes an unknown balance from a genuine zero',()=>{
+ f.state.session={...real,balanceKnown:false};render(<AccountMenu/>);expect(screen.getByText('Balance unavailable')).toBeTruthy();expect(screen.queryByText('0.00')).toBeNull();
 });

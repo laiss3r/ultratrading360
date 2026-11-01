@@ -15,7 +15,7 @@ export const revalidate = 0;
 
 function snapshot(session: StoredSession) {
   return { authenticated: true, session: publicSession(session), preferReal: session.initialRealAccountPending === true,
-    accounts: (session.accountRows ?? []).map((a) => ({loginid:a.account_loginid,currency:a.currency,balance:Number(a.balance??0),isVirtual:a.is_virtual===1})) };
+    accounts: (session.accountRows ?? []).map((a) => ({loginid:a.account_loginid,currency:a.currency,balance:Number(a.balance??0), balanceKnown: typeof a.balance === 'number' && Number.isFinite(a.balance),isVirtual:a.is_virtual===1})) };
 }
 
 /**
@@ -57,7 +57,7 @@ export async function GET(req: Request) {
         // that was the mobile navigation/logout loop. Transient keeps the session but
         // flags it stale so the client retries in the background.
         return NextResponse.json({
-          ...snapshot(session),
+          ...snapshot({...session, accountDiagnostics: (e as import('@/lib/deriv/auth').DerivAuthError).diagnostics ?? session.accountDiagnostics}),
           stale: verdict === 'transient',
         });
       }

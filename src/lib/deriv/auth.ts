@@ -1,15 +1,17 @@
-import { parseOptionsAccounts } from './accountList';
+import { optionsAccountRows, parseOptionsAccounts } from './accountList';
 import { DERIV_APP_ID, accountsEndpoint, otpEndpoint } from './config';
 import type { AdoptedRow } from './authorizeMap';
 
 import type { AccountInfo, AuthSession } from './types';
-import { accountsFromAuthorizePayload, authorizeViaSocket, scopesFromAuthorizePayload } from './wsAuthorize';
+import { derivJson } from './request';
+import { accountDiscoveryMessage, type AccountDiagnostics } from './accountDiagnostics';
 
 export class DerivAuthError extends Error {
   constructor(
     message: string,
     public readonly code: string = 'auth_failed',
     public readonly httpStatus?: number,
+    public readonly diagnostics?: AccountDiagnostics,
   ) {
     super(message);
     this.name = 'DerivAuthError';
@@ -42,7 +44,7 @@ function authHeaders(token: string, kind: 'pat' | 'oauth'): Record<string, strin
 export async function validateAccountsForToken(
   token: string,
   kind: 'pat' | 'oauth',
-): Promise<{ accounts: AccountInfo[]; scopes: string[]; source: 'options_rest' | 'classic_ws' }> {
+): Promise<{ accounts: AccountInfo[]; scopes: string[]; source: 'options_rest' | 'classic_ws'; diagnostics?: AccountDiagnostics }> {
   const trimmed = token.trim();
   if (!trimmed) throw new DerivAuthError('Token is empty.', 'empty_token');
   if (trimmed.length < 8) {
@@ -50,15 +52,16 @@ export async function validateAccountsForToken(
   }
 
   let res: Response;
+  let body: unknown;
   try {
-    res = await fetch(accountsEndpoint(), {
+    ({response: res, body} = await derivJson(accountsEndpoint(), {
       method: 'GET',
       headers: authHeaders(trimmed, kind),
       cache: 'no-store',
-    });
-  } catch (e) {
+    }));
+  } catch {
     throw new DerivAuthError(
-      `Could not reach the Deriv API (${(e as Error).message}). Check your network connection.`,
+      `Deriv did not complete the account request within 5 seconds. Retry the account refresh.`,
       'network',
     );
   }
@@ -90,39 +93,34 @@ export async function validateAccountsForToken(
     throw new DerivAuthError(`Deriv returned HTTP ${res.status}.`, 'http_error', res.status);
   }
 
-  const body: unknown = await res.json().catch(() => null);
-  let accounts = parseOptionsAccounts(body);
-
-  // An empty Options listing is NOT the end of discovery: the new REST endpoint
-  // only knows Options accounts (DOT.../ROT...), while classic CR/VRTC accounts —
-  // the ones every Deriv client's switcher shows — come from the legacy socket
-  // authorize call. Try it (hardened handshake + host failover) before anyone is
-  // told they have no accounts.
-  let source: 'options_rest' | 'classic_ws' | 'classic_browser' = 'options_rest';
-  let scopes: string[] | null = null;
-  if (!Array.isArray(accounts) || accounts.length === 0) {
-    const authorize = await authorizeViaSocket(trimmed);
-    const classic = accountsFromAuthorizePayload(authorize);
-    if (classic.length > 0) {
-      accounts = classic;
-      scopes = scopesFromAuthorizePayload(authorize);
-      source = 'classic_ws';
-    }
-  }
-
-  // Authenticated token, zero accounts on BOTH paths: a legitimate state on the
-  // new platform. Callers turn it into a flagged session that offers the explicit
-  // demo-account creation step instead of failing the sign-in.
-  if (!Array.isArray(accounts) || accounts.length === 0) {
-    throw new DerivAuthError(
-      'Deriv authenticated this token, but the profile has no trading account on either the new Options listing or the classic account list yet. The Connect page offers the free demo creation step.',
-      'no_accounts',
-    );
+  const rows = optionsAccountRows(body);
+  if (!rows) throw new DerivAuthError('Deriv returned an unreadable account response. No account or balance has been inferred.', 'account_response_invalid', 502);
+  const accounts = parseOptionsAccounts(body);
+  let diagnostics: AccountDiagnostics | undefined;
+  if (!accounts.some((account)=>account.is_virtual === 0) || accounts.length !== rows.length) {
+    // The current OAuth flow is REST + account OTP. Do not send its bearer to
+    // unrelated legacy sockets, wait for several failed handshakes, or call a
+    // historical mapping a live account. These two read-only endpoints explain
+    // the genuine empty state without creating an account or moving any funds.
+    const base = accountsEndpoint().replace(/\/accounts$/, '/legacy/');
+    const [migration, legacy] = await Promise.all(['migration-status', 'accounts'].map(async (path) => {
+      try { return await derivJson(base + path, {method: 'GET', headers: authHeaders(trimmed, kind), cache: 'no-store'}, 1500); }
+      catch { return null; }
+    }));
+    const state = (migration?.body as {status?: string} | null)?.status;
+    const mapping = (legacy?.body as {loginids?: unknown} | null)?.loginids;
+    diagnostics = {
+      checkedAt: Date.now(), httpStatus: res.status, returned: rows.length, accepted: accounts.length, rejected: rows.length - accounts.length,
+      migration: migration?.response.ok && ['complete','pending','failed','not_applicable'].includes(state ?? '') ? state as AccountDiagnostics['migration'] : 'unavailable',
+      legacyMappings: legacy?.response.ok && mapping && typeof mapping === 'object' && !Array.isArray(mapping) ? Object.keys(mapping).length : legacy?.response.status === 404 ? 0 : null,
+    };
+    if (!accounts.length) throw new DerivAuthError(accountDiscoveryMessage(diagnostics), 'no_accounts', undefined, diagnostics);
   }
   return {
     accounts,
-    scopes: scopes ?? (kind === 'pat' ? [...MINIMUM_READ_SCOPES] : ['trade', 'account_manage', 'application_read']),
-    source,
+    scopes: kind === 'pat' ? [...MINIMUM_READ_SCOPES] : ['trade', 'account_manage', 'application_read'],
+    source: 'options_rest',
+    diagnostics,
   };
 }
 
@@ -138,14 +136,14 @@ export async function ensureOptionsAccount(
   currency = 'USD',
 ): Promise<AccountInfo | null> {
   try {
-    const res = await fetch(accountsEndpoint(), {
+    const {response: res, body: createBody} = await derivJson(accountsEndpoint(), {
       method: 'POST',
       headers: authHeaders(token.trim(), kind),
       cache: 'no-store',
       body: JSON.stringify({ currency, group: 'row', account_type: 'demo' }),
     });
     if (!res.ok) return null;
-    const body = (await res.json().catch(() => null)) as {
+    const body = createBody as {
       data?:
         | { account_id?: string; currency?: string; balance?: number; account_type?: string }
         | Array<{ account_id?: string; currency?: string; balance?: number; account_type?: string }>;
@@ -192,20 +190,21 @@ export function classifyRevalidation(code: string): 'dead' | 'empty' | 'transien
  * trading account yet. Placeholder identity, flagged so the UI offers the explicit
  * creation step; carries no token of its own — the caller attaches the real one.
  */
-export function buildNoAccountsSession(kind: 'pat' | 'oauth', expiresAt: number | null): AuthSession {
+export function buildNoAccountsSession(kind: 'pat' | 'oauth', expiresAt: number | null, accountDiagnostics?: AccountDiagnostics): AuthSession {
   return {
     ...buildSession(kind, { account_loginid: '', currency: 'USD', balance: 0, is_virtual: 1 }, [], expiresAt),
     needsOptionsAccount: true,
+    accountDiagnostics,
   };
 }
 
 /** Convenience wrapper for the PAT login path. */
-export async function validatePat(token: string): Promise<{ accounts: AccountInfo[]; scopes: string[]; source: 'options_rest' | 'classic_ws' }> {
-  const { accounts, scopes, source } = await validateAccountsForToken(token, 'pat');
+export async function validatePat(token: string): Promise<{ accounts: AccountInfo[]; scopes: string[]; source: 'options_rest' | 'classic_ws'; diagnostics?: AccountDiagnostics }> {
+  const { accounts, scopes, source, diagnostics } = await validateAccountsForToken(token, 'pat');
   // Trade capability is verified separately at buy time, and an unprivileged
   // token fails there with an explicit NOT AUTHORIZED error rather than being
   // assumed usable.
-  return { accounts, scopes, source };
+  return { accounts, scopes, source, diagnostics };
 }
 
 /** Build the session record the UI displays. Never contains the token. */
@@ -221,6 +220,7 @@ export function buildSession(
     loginid: account.account_loginid,
     currency: account.currency,
     balance: Number(account.balance ?? 0),
+    balanceKnown: typeof account.balance === 'number' && Number.isFinite(account.balance) && Boolean(account.account_loginid),
     isVirtual,
     scopes,
     expiresAt,
@@ -233,14 +233,14 @@ export function buildSession(
  * over REST, then connect to /ws/demo or /ws/real with ?otp=.
  */
 export async function getSocketOtp(token: string, kind: 'pat' | 'oauth', accountId: string): Promise<string> {
-  const res = await fetch(otpEndpoint(accountId), {
+  const {response: res, body: otpBody} = await derivJson(otpEndpoint(accountId), {
     method: 'POST',
     headers: authHeaders(token, kind),
     cache: 'no-store',
   });
   if (res.status === 401) throw new DerivAuthError('Session expired while opening a trading socket (401).', 'invalid_token', 401);
   if (!res.ok) throw new DerivAuthError(`OTP request failed with HTTP ${res.status}.`, 'otp_failed', res.status);
-  const body = (await res.json()) as { data?: { url?: string; otp?: string }; url?: string; otp?: string };
+  const body = otpBody as { data?: { url?: string; otp?: string }; url?: string; otp?: string };
   const url = body?.data?.url ?? body?.url;
   if (url) return url;
   const otp = body?.data?.otp ?? body?.otp;
@@ -266,17 +266,18 @@ export async function exchangeAuthorizationCode(params: {
     redirect_uri: params.redirectUri,
   });
   let res: Response;
+  let tokenBody: unknown;
   try {
-    res = await fetch('https://auth.deriv.com/oauth2/token', {
+    ({response: res, body: tokenBody} = await derivJson('https://auth.deriv.com/oauth2/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
       body: form.toString(),
       cache: 'no-store',
-    });
+    }, 8000));
   } catch (e) {
     throw new DerivAuthError(`Could not reach Deriv's token endpoint (${(e as Error).message}).`, 'network');
   }
-  const body = (await res.json().catch(() => null)) as
+  const body = tokenBody as
     | { access_token?: string; expires_in?: number; token_type?: string; error?: string; error_description?: string }
     | null;
 

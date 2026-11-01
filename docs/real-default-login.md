@@ -1,3 +1,5 @@
+> **2026-11-01 follow-up:** The user reproduced missing accounts after this deployment. Earlier classic-discovery fixtures are not live OAuth proof. See [current investigation](account-discovery-investigation.md); private discovery remains unverified.
+
 # Real-first login, explicit switching afterward
 
 1 November 2026 (Nairobi).

@@ -14,3 +14,7 @@ describe('broker session views within the approved design',()=>{
  it('scopes the journal to this account and supports error filtering',()=>{render(<ExecutionConsole/>);fireEvent.click(screen.getByRole('tab',{name:'Journal'}));expect(document.body.textContent).toContain('Actual broker settlement');expect(document.body.textContent).not.toContain('OTHER ACCOUNT');fireEvent.change(screen.getByLabelText('Journal filter'),{target:{value:'errors'}});expect(document.body.textContent).toContain('No matching journal events');});
  it('locks Reset while a contract is pending and lets Stop block future entries',()=>{f.state.botState='running';f.state.bot={hasPendingOrder:()=>true};render(<ExecutionConsole/>);expect((screen.getByRole('button',{name:'Reset session view'}) as HTMLButtonElement).disabled).toBe(true);fireEvent.click(screen.getByRole('button',{name:'Stop bot'}));expect(f.state.stopBot).toHaveBeenCalledTimes(1);});
 });
+
+it('does not show a prior account ledger or a Demo label when no account identity was returned',()=>{
+ f.state.session={loginid:'',currency:'USD'};render(<ExecutionConsole/>);expect(document.body.textContent).toContain('No trading account selected');expect(document.body.textContent).not.toContain('DOT_TEST');expect(document.body.textContent).not.toContain('999');fireEvent.click(screen.getByRole('tab',{name:'Journal'}));expect(document.body.textContent).not.toContain('Actual broker settlement');
+});

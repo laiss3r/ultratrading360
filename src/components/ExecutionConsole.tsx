@@ -19,7 +19,7 @@ export function ExecutionConsole({compact=false}:{compact?:boolean}){
  const [tab,setTab]=useState<'summary'|'transactions'|'journal'>('summary'),[filter,setFilter]=useState('all'),[notice,setNotice]=useState(''),[clock,setClock]=useState(0);
  useEffect(()=>{const timer=setInterval(()=>setClock(Date.now()),1000);return()=>clearInterval(timer);},[]);
  const account=session?.loginid;const resetAt=resets?.[`${mode}:${account??'none'}`]??0;
- const own=(e:{mode:string;accountLoginid?:string;at?:number;closedAt?:number})=>e.mode===mode&&(!account||e.accountLoginid===account)&&(e.at??e.closedAt??0)>resetAt;
+ const own=(e:{mode:string;accountLoginid?:string;at?:number;closedAt?:number})=>e.mode===mode&&(!!account&&e.accountLoginid===account)&&(e.at??e.closedAt??0)>resetAt;
  const entries=(journal??[]).filter(own);
  const active=execution&&own(execution)?execution:null;
  const runId=active?.runId??entries[0]?.runId;
@@ -28,13 +28,13 @@ export function ExecutionConsole({compact=false}:{compact?:boolean}){
  const pending=bot?.hasPendingOrder()??false,running=['starting','running','paused','stopping'].includes(state);
  const current=active&&['pricing','buying','open','stopping','error','halted'].includes(active.phase)&&(!active.contractId||!records.some((t)=>!t.error&&t.contractId===active.contractId))?active:null;
  const staleSignal=signal&&clock>0&&clock-signal.lastTickAt>5000;
- const accountJournal=(journal??[]).filter((e)=>e.mode===mode&&(!account||e.accountLoginid===account));
+ const accountJournal=(journal??[]).filter((e)=>e.mode===mode&&(!!account&&e.accountLoginid===account));
  const journalRecords=includePast?accountJournal:entries;
  const accepted=current?.contractId&&!records.some((t)=>t.contractId===current.contractId)?1:0;
  const exportJournal=()=>{const a=document.createElement('a');const url=URL.createObjectURL(new Blob([JSON.stringify(journalRecords,null,2)],{type:'application/json'}));a.href=url;a.download='execution-journal.json';a.click();URL.revokeObjectURL(url);};
  const visible=journalRecords.filter((e)=>filter==='all'||(filter==='signals'?['waiting','qualified'].includes(e.phase):filter==='errors'?['error','halted'].includes(e.phase):['pricing','buying','open','settled'].includes(e.phase)));
  return <div className="stack" style={{gap:14}}>
-  <div className="button-row space-between"><span className={`badge ${running?'badge-green':'badge-neutral'}`}>{active?.phase??state}</span><span className="micro muted">{account??'No connected account'} · {mode==='deriv_real'?'REAL':'DEMO'} · {session?.currency??'—'}</span></div>
+  <div className="button-row space-between"><span className={`badge ${running?'badge-green':'badge-neutral'}`}>{active?.phase??state}</span><span className="micro muted">{account ? `${account} · ${mode==='deriv_real'?'REAL':'DEMO'} · ${session?.currency??'—'}` : 'No trading account selected'}</span></div>
   <p className="micro" role="status">{active?.detail||detail||'No session running. The bot waits for validated entry conditions.'}</p>
   {signal&&running&&!['open','buying'].includes(active?.phase??'')&&<Notice tone={signal.status==='qualified'&&!staleSignal?'success':'info'}>{staleSignal?'Signal expired: waiting for fresh live evidence.':signal.reason}<small style={{display:'block'}}>Current leg: {signal.contractType} · suffix {signal.pattern} · held-out {signal.validation.hits}/{signal.validation.total} · new live {signal.forward.hits}/{signal.forward.total}. No order is allowed on insufficient evidence.</small></Notice>}
   <div className="rail-tabs" role="tablist" aria-label={compact?'Monitor views':'Session views'}>{(['summary','transactions','journal'] as const).map((name)=><button key={name} role="tab" aria-selected={tab===name} onClick={()=>setTab(name)}>{name[0].toUpperCase()+name.slice(1)}</button>)}</div>

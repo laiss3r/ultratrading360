@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { buildNoAccountsSession, buildSession, DerivAuthError, validatePat } from '@/lib/deriv/auth';
-import { encryptSession, HANDOFF_COOKIE, publicSession, SESSION_COOKIE, sessionExpirySeconds, signValue } from '@/lib/oauth/session';
+import { encryptSession, publicSession, SESSION_COOKIE, sessionExpirySeconds } from '@/lib/oauth/session';
 import type { AccountInfo } from '@/lib/deriv/types';
 
 export const dynamic = 'force-dynamic';
@@ -34,12 +34,14 @@ export async function POST(req: Request) {
     let accounts: AccountInfo[] = [];
     let scopes: string[] = [];
     let noAccounts = false;
+    let diagnostics: DerivAuthError['diagnostics'];
     let source: 'options_rest' | 'classic_ws' | 'classic_browser' = 'options_rest';
     try {
-      ({ accounts, scopes, source } = await validatePat(raw));
+      ({ accounts, scopes, source, diagnostics } = await validatePat(raw));
     } catch (e) {
       const err = e as DerivAuthError;
       if (err.code !== 'no_accounts') throw err;
+      diagnostics = err.diagnostics;
       noAccounts = true; // authenticated PAT, profile without an Options account yet
 
     }
@@ -47,8 +49,8 @@ export async function POST(req: Request) {
     // PATs carry no expiry we can read from the API; cap the local session at 8 hours so a
     // stale cookie cannot outlive a revoked token by much.
     const session = noAccounts
-      ? { ...buildNoAccountsSession('pat', null), initialRealAccountPending: primary?.is_virtual !== 0, accessToken: raw.trim() }
-      : { ...buildSession('pat', primary as AccountInfo, scopes, null), accountsSource: source, accountRows: accounts, initialRealAccountPending: primary?.is_virtual !== 0, accessToken: raw.trim() };
+      ? { ...buildNoAccountsSession('pat', null, diagnostics), initialRealAccountPending: primary?.is_virtual !== 0, accessToken: raw.trim() }
+      : { ...buildSession('pat', primary as AccountInfo, scopes, null), accountDiagnostics: diagnostics, accountsSource: source, accountRows: accounts, initialRealAccountPending: primary?.is_virtual !== 0, accessToken: raw.trim() };
 
     const res = NextResponse.json({
       ok: true,
@@ -57,7 +59,7 @@ export async function POST(req: Request) {
       accounts: accounts.map((a) => ({
         loginid: a.account_loginid,
         currency: a.currency,
-        balance: a.balance ?? 0,
+        balance: a.balance ?? 0, balanceKnown: typeof a.balance === 'number' && Number.isFinite(a.balance),
         isVirtual: a.is_virtual === 1,
       })),
       warning:
@@ -70,15 +72,6 @@ export async function POST(req: Request) {
       path: '/',
       maxAge: sessionExpirySeconds(session),
     });
-    {
-      res.cookies.set(HANDOFF_COOKIE, signValue('1'), {
-        httpOnly: true,
-        secure: true,
-        sameSite: 'lax',
-        path: '/',
-        maxAge: 120,
-      });
-    }
     return res;
   } catch (e) {
     if (e instanceof DerivAuthError) {

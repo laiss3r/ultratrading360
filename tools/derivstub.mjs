@@ -35,6 +35,8 @@ http
     const url = new URL(req.url, 'http://x');
     if (process.env.STUB_TRADING === '1' && url.pathname === '/__fixture/reset' && req.method === 'POST') {tradeLog.length=0;proposals.clear();contracts.clear();proposalIndex=0;contractIndex=0;res.writeHead(200);return res.end('{}');}
     if (process.env.STUB_TRADING === '1' && url.pathname === '/__fixture/trades') { res.writeHead(200, {'content-type':'application/json'}); return res.end(JSON.stringify(tradeLog)); }
+    if (url.pathname === '/trading/v1/options/legacy/migration-status') {res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({status:process.env.STUB_MIGRATION || 'complete'}));}
+    if (url.pathname === '/trading/v1/options/legacy/accounts') {if(['pending','failed'].includes(process.env.STUB_MIGRATION)){res.writeHead(409,{'content-type':'application/json'});return res.end(JSON.stringify({errors:[{status:409,code:'MigrationPending',message:'User migration is pending or has failed'}]}));}res.writeHead(200,{'content-type':'application/json'});return res.end(JSON.stringify({loginids:{CR_FIXTURE:[{account_id:123,currency:'USD'}]}}));}
     if (url.pathname.endsWith('/otp') && req.method === 'POST') {
       const id = url.pathname.split('/').at(-2);
       res.writeHead(200, { 'content-type': 'application/json' });
@@ -47,7 +49,7 @@ http
         return res.end(JSON.stringify({ message: 'stub transient fault' }));
       }
       res.writeHead(200, { 'content-type': 'application/json' });
-      return res.end(JSON.stringify({ data: process.env.STUB_DEMO_ONLY === '1' ? REST_ROWS.filter((a) => a.account_type === 'demo') : REST_ROWS }));
+      return res.end(JSON.stringify({ data: process.env.STUB_EMPTY === '1' ? [] : process.env.STUB_DEMO_ONLY === '1' ? REST_ROWS.filter((a) => a.account_type === 'demo') : REST_ROWS }));
     }
     if (url.pathname === '/trading/v1/options/accounts' && req.method === 'POST') {
       res.writeHead(201, { 'content-type': 'application/json' });

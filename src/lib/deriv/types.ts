@@ -137,6 +137,8 @@ export interface DerivMessage {
 export type AccountMode = 'deriv_demo' | 'deriv_real';
 
 export interface AuthSession {
+  accountDiagnostics?: import('./accountDiagnostics').AccountDiagnostics;
+  balanceKnown?: boolean;
   kind: 'oauth' | 'pat';
   loginid: string;
   currency: string;

@@ -52,7 +52,7 @@ describe('fresh-login Real preference', () => {
     const response=await GET(new Request('https://example.test/api/deriv/session?refresh=1'));
     const data=await response.json();
     expect(data.session.loginid).toBe(session.loginid);expect(data.preferReal).toBe(true);
-    expect(data.accounts).toContainEqual({loginid:'ROT1',balance:0,currency:'USD',isVirtual:false});
+    expect(data.accounts).toContainEqual({loginid:'ROT1',balance:0,balanceKnown:true,currency:'USD',isVirtual:false});
     expect(response.headers.get('set-cookie')).toBeNull();
     expect(data.session.accessToken).toBeUndefined();
     expect(data.session.initialRealAccountPending).toBeUndefined();

@@ -2,7 +2,7 @@
  * Deriv API configuration.
  *
  * VERIFIED 2026-10-29 against the live API:
- *  - The legacy V1 socket hosts (ws.derivws.com, ws.binaryws.com) return HTTP 520 and are DEAD.
+ *  - The legacy V1 socket hosts (ws.derivws.com, ws.binaryws.com) have failed cloud handshakes (520/timeouts); this does not prove universal retirement.
  *  - The current public market-data socket is api.derivws.com/trading/v1/options/ws/public.
  *  - `app_id` is NOT validated on the public socket: 1089, 90470, 1, 99999999 and even an
  *    empty value all return the same 89 markets. It is an attribution/identifier field only.

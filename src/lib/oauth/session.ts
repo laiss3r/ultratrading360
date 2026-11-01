@@ -118,6 +118,8 @@ export function publicSession(s: StoredSession): AuthSession {
     loginid: s.loginid,
     currency: s.currency,
     balance: s.balance,
+    balanceKnown: s.balanceKnown,
+    accountDiagnostics: s.accountDiagnostics,
     isVirtual: s.isVirtual,
     scopes: s.scopes,
     expiresAt: s.expiresAt,

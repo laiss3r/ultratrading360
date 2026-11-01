@@ -18,6 +18,7 @@ export async function POST() {
   if (!session?.accessToken || (session.expiresAt && session.expiresAt < Date.now())) {
     return NextResponse.json({ ok: false, message: 'No Deriv session. Sign in first.' }, { status: 401 });
   }
+  if (session.kind !== 'pat' || !session.accountRows?.some((a)=>/^(CR|VRT|VRD)/.test(a.account_loginid))) return NextResponse.json({ok:false,message:'Current Options accounts use REST and OTP, not legacy token handoff.'},{status:409});
   const res = NextResponse.json({ ok: true });
   res.cookies.set(HANDOFF_COOKIE, signValue('1'), {
     httpOnly: true,

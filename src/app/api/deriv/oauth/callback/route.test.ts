@@ -5,6 +5,7 @@ const f=vi.hoisted(()=>({jar:new Map<string,string>(),exchange:vi.fn(),validate:
 vi.mock('next/headers',()=>({cookies:async()=>({get:(name:string)=>f.jar.has(name)?{value:f.jar.get(name)}:undefined})}));
 vi.mock('@/lib/deriv/auth',async(original)=>({...await original<typeof import('@/lib/deriv/auth')>(),exchangeAuthorizationCode:f.exchange,validateAccountsForToken:f.validate}));
 import {POST} from './route';
+import {DerivAuthError} from '@/lib/deriv/auth';
 const state='synthetic-state-for-unit-test';
 const request=()=>new Request('https://example.test/api/deriv/oauth/callback',{method:'POST',body:JSON.stringify({state,code:'synthetic-code'})});
 const old:StoredSession={kind:'oauth',loginid:'DOT_OLD',currency:'USD',balance:42,isVirtual:true,scopes:['trade'],expiresAt:null,accessToken:'synthetic-test-only'};
@@ -24,4 +25,11 @@ it('cannot treat an unrelated old Demo cookie as a successful new authorization'
 it('recovers only the exact completed OAuth attempt without another token exchange',async()=>{
  f.jar.set(SESSION_COOKIE,encryptSession({...old,loginid:'ROT1',isVirtual:false,authAttemptId:createHash('sha256').update(state).digest('hex')}));
  const response=await POST(request());expect((await response.json()).session.loginid).toBe('ROT1');expect(f.exchange).not.toHaveBeenCalled();expect(response.headers.get('set-cookie')).toBeNull();
+});
+
+it('preserves successful authentication and the migration diagnosis without inventing Demo or granting browser token handoff',async()=>{
+ f.jar.set(STATE_COOKIE,signValue(state));f.jar.set(VERIFIER_COOKIE,signValue('synthetic-verifier'));f.exchange.mockResolvedValue({accessToken:'synthetic-test-only',expiresIn:3600});
+ const diagnostics={checkedAt:1,httpStatus:200,returned:0,accepted:0,rejected:0,migration:'pending' as const,legacyMappings:1};
+ f.validate.mockRejectedValue(new DerivAuthError('Migration pending','no_accounts',undefined,diagnostics));
+ const response=await POST(request());const data=await response.json();expect(data.ok).toBe(true);expect(data.session.loginid).toBe('');expect(data.session.balanceKnown).toBe(false);expect(data.session.accountDiagnostics).toEqual(diagnostics);expect(data.accounts).toEqual([]);expect(response.cookies.get('ut_handoff')).toBeUndefined();expect(data.session.accessToken).toBeUndefined();expect(decryptSession(response.cookies.get(SESSION_COOKIE)!.value)?.accountDiagnostics).toEqual(diagnostics);
 });

@@ -26,14 +26,15 @@ export async function GET(req: Request) {
 
   if (new URL(req.url).searchParams.get('cached') === '1') {
     return NextResponse.json({ ok: true, cached: true, accounts: (session.accountRows ?? []).map((a) => ({
-      loginid: a.account_loginid, currency: a.currency, balance: Number(a.balance ?? 0), isVirtual: a.is_virtual === 1,
+      loginid: a.account_loginid, currency: a.currency, balance: Number(a.balance ?? 0), balanceKnown: typeof a.balance === 'number' && Number.isFinite(a.balance), isVirtual: a.is_virtual === 1,
     })) });
   }
 
   try {
     let accounts;
+    let diagnostics;
     try {
-      ({ accounts } = await validateAccountsForToken(session.accessToken, session.kind));
+      ({ accounts, diagnostics } = await validateAccountsForToken(session.accessToken, session.kind));
     } catch (e) {
       if ((e as { code?: string }).code === 'no_accounts') {
         // Keep the switcher populated with the rows this session already proved
@@ -42,10 +43,12 @@ export async function GET(req: Request) {
         return NextResponse.json({
           ok: true,
           cached: true,
+          diagnostics: (e as DerivAuthError).diagnostics,
+          message: (e as DerivAuthError).message,
           accounts: rows.map((a) => ({
             loginid: a.account_loginid,
             currency: a.currency,
-            balance: Number(a.balance ?? 0),
+            balance: Number(a.balance ?? 0), balanceKnown: typeof a.balance === 'number' && Number.isFinite(a.balance),
             isVirtual: a.is_virtual === 1 || /^VRT/i.test(a.account_loginid ?? ''),
             accountType: a.account_type ?? null,
           })),
@@ -58,10 +61,11 @@ export async function GET(req: Request) {
     const updated = { ...session, accountRows: Array.from(merged.values()) };
     const response = NextResponse.json({
       ok: true,
+      diagnostics,
       accounts: updated.accountRows.map((a) => ({
         loginid: a.account_loginid,
         currency: a.currency,
-        balance: Number(a.balance ?? 0),
+        balance: Number(a.balance ?? 0), balanceKnown: typeof a.balance === 'number' && Number.isFinite(a.balance),
         isVirtual: a.is_virtual === 1 || /^VRT/i.test(a.account_loginid ?? ''),
         accountType: a.account_type ?? null,
       })),

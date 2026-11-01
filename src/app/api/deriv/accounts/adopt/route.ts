@@ -59,7 +59,7 @@ export async function POST(req: Request) {
     accounts: accounts.map((a) => ({
       loginid: a.account_loginid,
       currency: a.currency,
-      balance: a.balance ?? 0,
+      balance: a.balance ?? 0, balanceKnown: typeof a.balance === 'number' && Number.isFinite(a.balance),
       isVirtual: a.is_virtual === 1,
     })),
   });

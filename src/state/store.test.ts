@@ -42,24 +42,24 @@ describe('incomplete account discovery regression',()=>{
     const fetchMock=vi.fn(async(url:string)=>new Response(JSON.stringify(url==='/api/deriv/accounts'?{ok:true,cached,accounts:rows}:{ok:true})));
     vi.stubGlobal('fetch',fetchMock);return fetchMock;
   }
-  it('does not stop after a non-empty Demo-only REST listing',async()=>{
-    const fetchMock=setup([demo]);vi.mocked(runClassicDiscovery).mockResolvedValue({ok:true,accounts:[classicReal],message:'Discovered'});
+  it('finishes a valid Demo-only listing without an unrelated legacy token handoff',async()=>{
+    const fetchMock=setup([demo]);
     expect((await useApp.getState().syncBalances()).ok).toBe(true);
-    expect(fetchMock).toHaveBeenCalledWith('/api/deriv/handoff/refresh',expect.anything());expect(runClassicDiscovery).toHaveBeenCalledOnce();
-    expect(useApp.getState().accounts).toEqual([demo,classicReal]);expect(useApp.getState().session?.loginid).toBe(demo.loginid);
+    expect(fetchMock).toHaveBeenCalledTimes(1);expect(runClassicDiscovery).not.toHaveBeenCalled();
+    expect(useApp.getState().accounts).toEqual([demo]);expect(useApp.getState().session?.loginid).toBe(demo.loginid);
     expect(useApp.getState().settings.realTradingAcknowledged).toBe(false);
   });
   it('does not expose a token handoff when fresh REST already returns both environments',async()=>{
     const fetchMock=setup([demo,classicReal]);expect((await useApp.getState().syncBalances()).ok).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);expect(runClassicDiscovery).not.toHaveBeenCalled();
   });
-  it('retains Demo and surfaces discovery failure rather than fabricating a Real row',async()=>{
-    setup([demo]);vi.mocked(runClassicDiscovery).mockResolvedValue({ok:false,accounts:[],message:'Legacy authorization unavailable'});
-    const result=await useApp.getState().syncBalances();expect(result.ok).toBe(false);expect(result.message).toContain('Legacy authorization unavailable');expect(useApp.getState().accounts).toEqual([demo]);expect(useApp.getState().busy).toBeNull();
+  it('retains rows and surfaces a real REST failure instead of fabricating a Real row',async()=>{
+    setup([demo]);vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify({ok:false,message:'Deriv temporarily unavailable'}),{status:502})));
+    const result=await useApp.getState().syncBalances();expect(result.ok).toBe(false);expect(result.message).toContain('Deriv temporarily unavailable');expect(useApp.getState().accounts).toEqual([demo]);expect(useApp.getState().busy).toBeNull();expect(runClassicDiscovery).not.toHaveBeenCalled();
   });
-  it('keeps trying additional sources when a cached list contains both types',async()=>{
-    setup([demo,classicReal],true);vi.mocked(runClassicDiscovery).mockResolvedValue({ok:true,accounts:[classicReal],message:'Updated'});
-    await useApp.getState().syncBalances();expect(runClassicDiscovery).toHaveBeenCalledOnce();
+  it('does not restart legacy discovery on a cached listing',async()=>{
+    const fetchMock=setup([demo,classicReal],true);
+    await useApp.getState().syncBalances();expect(runClassicDiscovery).not.toHaveBeenCalled();expect(fetchMock).toHaveBeenCalledTimes(1);
   });
   it('does not overlap account operations',async()=>{
     const fetchMock=setup([demo]);useApp.setState({busy:'switch-account'});expect((await useApp.getState().syncBalances()).ok).toBe(false);expect(fetchMock).not.toHaveBeenCalled();expect(runClassicDiscovery).not.toHaveBeenCalled();
@@ -120,4 +120,14 @@ it('finishes authentication without waiting for market/socket initialization',as
  const applyMode=vi.fn(()=>new Promise<void>(()=>{}));useApp.setState({applyMode});
  const result=await useApp.getState().finishAuthentication({session:real,accounts:[real]});
  expect(result.ok).toBe(true);expect(useApp.getState().session?.loginid).toBe(real.loginid);expect(applyMode).toHaveBeenCalledWith('deriv_real',false);
+});
+
+it('blocks execution with an authenticated credential but no selected account identity',async()=>{
+ const strategy=createStrategy();useApp.setState({session:{...real,loginid:'',isVirtual:true},tradingLoginid:'',strategies:[strategy],provider:{mode:'deriv_demo',isConnected:()=>true} as MarketProvider,settings:{...DEFAULT_SETTINGS,limits:{...DEFAULT_SETTINGS.limits,tradingEnabled:true}}});
+ expect((await useApp.getState().runStrategy(strategy.id)).ok).toBe(false);expect(useApp.getState().bot).toBeNull();
+});
+it('reports empty REST discovery without reopening sockets or leaving busy set',async()=>{
+ useApp.setState({session:{...real,loginid:''},accounts:[]});
+ vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify({ok:true,accounts:[],message:'Migration pending',diagnostics:{httpStatus:200,returned:0,accepted:0,rejected:0,migration:'pending',legacyMappings:1,checkedAt:1}}))));
+ const result=await useApp.getState().syncBalances();expect(result.message).toBe('Migration pending');expect(useApp.getState().session?.accountDiagnostics?.migration).toBe('pending');expect(useApp.getState().busy).toBeNull();expect(runClassicDiscovery).not.toHaveBeenCalled();
 });

@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { DERIV_API_BASE } from '@/lib/deriv/config';
+import { derivJson } from '@/lib/deriv/request';
+import { parseOptionsAccounts } from '@/lib/deriv/accountList';
+import { DERIV_APP_ID, DERIV_API_BASE } from '@/lib/deriv/config';
 import { DerivAuthError, validateAccountsForToken, buildSession } from '@/lib/deriv/auth';
 import type { AccountInfo } from '@/lib/deriv/types';
 import { decryptSession, encryptSession, publicSession, SESSION_COOKIE, sessionExpirySeconds } from '@/lib/oauth/session';
@@ -36,22 +38,24 @@ export async function POST(req: Request) {
 
   const currency = (body.currency || session.currency || 'USD').toUpperCase();
   let res: Response;
+  let responseBody: unknown;
   try {
-    res = await fetch(`${DERIV_API_BASE}/trading/v1/options/accounts`, {
+    ({response: res, body: responseBody} = await derivJson(`${DERIV_API_BASE}/trading/v1/options/accounts`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${session.accessToken}`,
         'Content-Type': 'application/json',
         Accept: 'application/json',
+        ...(session.kind === 'pat' ? {'Deriv-App-ID': DERIV_APP_ID} : {}),
       },
       cache: 'no-store',
       body: JSON.stringify({ currency, group: 'row', account_type: accountType }),
-    });
+    }));
   } catch (e) {
     return NextResponse.json({ ok: false, message: `Could not reach Deriv (${(e as Error).message}).` }, { status: 502 });
   }
 
-  const detail = (await res.json().catch(() => null)) as {
+  const detail = responseBody as {
     message?: string;
     error?: string;
     data?:
@@ -75,14 +79,7 @@ export async function POST(req: Request) {
   // object when it already existed). Build the session from THAT - the listing
   // can lag behind - and only use a re-read to enrich the switcher list.
   const rawCreated = Array.isArray(detail?.data) ? detail?.data[0] : detail?.data;
-  const createdRow: AccountInfo | null = rawCreated?.account_id
-    ? {
-        account_loginid: rawCreated.account_id,
-        currency: (rawCreated.currency ?? currency).toUpperCase(),
-        balance: Number(rawCreated.balance ?? 0),
-        is_virtual: rawCreated.account_type === 'demo' ? 1 : 0,
-      }
-    : null;
+  const createdRow = rawCreated ? parseOptionsAccounts({data:[rawCreated]})[0] : null;
   if (!createdRow) {
     return NextResponse.json(
       { ok: false, message: `Deriv answered HTTP ${res.status} without an account object.` },
@@ -116,7 +113,7 @@ export async function POST(req: Request) {
       accounts: accounts.map((a) => ({
         loginid: a.account_loginid,
         currency: a.currency,
-        balance: a.balance ?? 0,
+        balance: a.balance ?? 0, balanceKnown: typeof a.balance === 'number' && Number.isFinite(a.balance),
         isVirtual: a.is_virtual === 1,
       })),
     });

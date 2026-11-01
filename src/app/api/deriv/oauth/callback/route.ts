@@ -9,10 +9,8 @@ import {
   encryptSession,
   decryptSession,
   publicSession,
-  HANDOFF_COOKIE,
   SESSION_COOKIE,
   sessionExpirySeconds,
-  signValue,
   STATE_COOKIE,
   VERIFIER_COOKIE,
   verifySignedValue,
@@ -53,7 +51,7 @@ export async function POST(req: Request) {
   const previousRaw = store.get(SESSION_COOKIE)?.value;
   const previous = previousRaw ? decryptSession(previousRaw) : null;
   if(previous?.authAttemptId===attemptId&&(!previous.expiresAt||previous.expiresAt>Date.now())) {
-    return NextResponse.json({ok:true,session:publicSession(previous),accounts:(previous.accountRows??[]).map((a)=>({loginid:a.account_loginid,currency:a.currency,balance:a.balance??0,isVirtual:a.is_virtual===1}))});
+    return NextResponse.json({ok:true,session:publicSession(previous),accounts:(previous.accountRows??[]).map((a)=>({loginid:a.account_loginid,currency:a.currency,balance:a.balance??0, balanceKnown: typeof a.balance === 'number' && Number.isFinite(a.balance),isVirtual:a.is_virtual===1}))});
   }
   const stateCookie = store.get(STATE_COOKIE)?.value;
   const verifierCookie = store.get(VERIFIER_COOKIE)?.value;
@@ -100,9 +98,10 @@ export async function POST(req: Request) {
   let accounts: AccountInfo[] = [];
   let scopes: string[] = [];
   let noAccounts = false;
+  let diagnostics: DerivAuthError['diagnostics'];
   let source: 'options_rest' | 'classic_ws' | 'classic_browser' = 'options_rest';
   try {
-    ({ accounts, scopes, source } = await validateAccountsForToken(token.accessToken, 'oauth'));
+    ({ accounts, scopes, source, diagnostics } = await validateAccountsForToken(token.accessToken, 'oauth'));
   } catch (e) {
     const err = e as DerivAuthError;
     if (err.code !== 'no_accounts') {
@@ -110,6 +109,7 @@ export async function POST(req: Request) {
     }
     // Never create/select Demo automatically to make a fresh login appear successful.
     noAccounts = true;
+    diagnostics = err.diagnostics;
   }
 
   // Fresh login opens the returned Real account for viewing. Real execution still
@@ -117,9 +117,10 @@ export async function POST(req: Request) {
   const primary = accounts.find((a) => a.is_virtual !== 1) ?? accounts[0];
   const expiresAt = token.expiresIn > 0 ? Date.now() + token.expiresIn * 1000 : null;
   const session = noAccounts
-    ? { ...buildNoAccountsSession('oauth', expiresAt), initialRealAccountPending: primary?.is_virtual !== 0, authAttemptId: attemptId, accessToken: token.accessToken }
+    ? { ...buildNoAccountsSession('oauth', expiresAt, diagnostics), initialRealAccountPending: primary?.is_virtual !== 0, authAttemptId: attemptId, accessToken: token.accessToken }
     : {
         ...buildSession('oauth', primary as AccountInfo, scopes, expiresAt),
+        accountDiagnostics: diagnostics,
         accountsSource: source,
         accountRows: accounts,
         initialRealAccountPending: primary?.is_virtual !== 0, authAttemptId: attemptId, accessToken: token.accessToken,
@@ -132,7 +133,7 @@ export async function POST(req: Request) {
     accounts: accounts.map((a) => ({
       loginid: a.account_loginid,
       currency: a.currency,
-      balance: a.balance ?? 0,
+      balance: a.balance ?? 0, balanceKnown: typeof a.balance === 'number' && Number.isFinite(a.balance),
       isVirtual: a.is_virtual === 1,
     })),
   });
@@ -143,17 +144,6 @@ export async function POST(req: Request) {
     path: '/',
     maxAge: sessionExpirySeconds(session),
   });
-  {
-    // Permit exactly one browser-side classic discovery run (120s, single-use) on
-    // every sign-in: classic Real/Demo rows are what every Deriv client shows.
-    res.cookies.set(HANDOFF_COOKIE, signValue('1'), {
-      httpOnly: true,
-      secure: redirectUri.startsWith('https://'),
-      sameSite: 'lax',
-      path: '/',
-      maxAge: 120,
-    });
-  }
   clearAuthCookies(res);
   return res;
 }
