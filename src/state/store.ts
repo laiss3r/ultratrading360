@@ -141,6 +141,9 @@ function entropy(digits: number[]): number {
 
 const PREF_LOGINID = 'ut_pref_loginid';
 let modeRevision = 0;
+let settingsRevision = 0;
+let settingsSave: Promise<void> = Promise.resolve();
+let hydration: Promise<void> | null = null;
 let upkeepStarted = false;
 let stopBalances: (() => void) | null = null;
 const lastBalances = new Map<string, BalanceUpdate>();
@@ -200,13 +203,16 @@ export const useApp = create<State & Actions>()((set, get) => ({
 
   async hydrate() {
     if (get().hydrated) return;
+    if (hydration) return hydration;
+    hydration = (async()=>{
     const revision = identityRevision();
+    const readSettingsRevision = settingsRevision;
     const storedSettings = await loadSettings();
     const strategies = await listStrategies();
     const trades = await listTrades();
     const executionJournal=await loadExecutionJournal();
     const sessionResets=await loadSessionResets();
-    const settings = revision===identityRevision()?storedSettings:get().settings;
+    const settings = revision===identityRevision() && readSettingsRevision===settingsRevision?storedSettings:get().settings;
     const risk = new RiskManager(settings.limits, settings.recovery, 0);
     set({
       settings,
@@ -230,8 +236,10 @@ export const useApp = create<State & Actions>()((set, get) => ({
     // switching already persists the choice in this cookie.
     const active = get().session?.loginid ?? null;
     const activeRow = active ? get().accounts.find((a) => a.loginid === active) : null;
-    const mode = activeRow ? (activeRow.isVirtual ? 'deriv_demo' : 'deriv_real') : settings.mode;
+    const mode = activeRow ? (activeRow.isVirtual ? 'deriv_demo' : 'deriv_real') : get().settings.mode;
     await get().applyMode(mode, true);
+    })();
+    try { await hydration; } finally { hydration = null; }
   },
 
   async loadConfig() {
@@ -270,6 +278,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
   },
 
   async setSettings(patch: Partial<AppSettings>) {
+    settingsRevision++;
     const next = { ...get().settings, ...patch };
     // The risk manager is the single source of truth for limits; keep it in sync.
     next.limits = { ...next.limits, realTradingAcknowledged: next.realTradingAcknowledged };
@@ -278,7 +287,9 @@ export const useApp = create<State & Actions>()((set, get) => ({
     get().risk.limits = get().bot ? effectiveStrategyLimits(next.limits, get().bot!.strategy) : next.limits;
     get().risk.recovery = next.recovery;
     set({ riskSnapshot: get().risk.getSnapshot() });
-    await saveSettings(next);
+    const write = settingsSave.catch(()=>{}).then(()=>saveSettings(next));
+    settingsSave = write;
+    await write;
   },
 
   /* ---------------------------------------------------------- connection */
@@ -816,6 +827,34 @@ export const useApp = create<State & Actions>()((set, get) => ({
 
   /* ---------------------------------------------------------- bot control */
 
+  /** Called ONLY by the explicit account/stake confirmation, never by login or a timer. */
+  async authorizeConfirmedRun(loginid: string, acknowledgeReal: boolean) {
+    const session = get().session;
+    const revision = identityRevision();
+    if (!loginid || session?.loginid !== loginid) return {ok:false,message:'The selected account changed. Review the account and confirm again.'};
+    if (get().bot?.hasPendingOrder() || ['starting','running','paused','stopping'].includes(get().botState)) return {ok:false,message:'Stop the active bot and wait for settlement before starting another.'};
+    const real = !session.isVirtual;
+    const alreadyAcknowledged = get().settings.realTradingAcknowledged && get().settings.acknowledgedAccountLoginid === loginid;
+    if (real && !alreadyAcknowledged && !acknowledgeReal) return {ok:false,message:'Acknowledge the real-money risk for this selected account before confirming.'};
+    await get().setSettings({
+      limits:{...get().settings.limits,tradingEnabled:true},
+      ...(real ? {realTradingAcknowledged:true,acknowledgedAccountLoginid:loginid} : {}),
+    });
+    if (revision!==identityRevision() || get().session?.loginid!==loginid) return {ok:false,message:'Account changed during confirmation. No bot was started.'};
+    if (get().tradingConnecting && get().tradingLoginid !== loginid) await new Promise<void>((resolve)=>{
+      let unsubscribe=()=>{};
+      const finish=()=>{clearTimeout(timer);unsubscribe();resolve();};
+      const timer=setTimeout(finish,8000);
+      unsubscribe=useApp.subscribe((state)=>{if(state.session?.loginid!==loginid || state.tradingLoginid===loginid || !state.tradingConnecting || !state.settings.limits.tradingEnabled)finish();});
+    });
+    if (get().tradingLoginid !== loginid && !get().tradingConnecting) await get().attachTradingSocket(real?'deriv_real':'deriv_demo');
+    if (revision!==identityRevision() || get().session?.loginid!==loginid) return {ok:false,message:'Account changed while verifying its connection. No bot was started.'};
+    if (!get().settings.limits.tradingEnabled) return {ok:false,message:'Trading permission was turned off. No bot was started.'};
+    if (real && (!get().settings.realTradingAcknowledged || get().settings.acknowledgedAccountLoginid!==loginid)) return {ok:false,message:'Real permission was revoked. No bot was started.'};
+    if (get().tradingLoginid!==loginid) return {ok:false,message:get().tradingMessage ?? 'Deriv has not verified a trading connection for this account.'};
+    return {ok:true,message:'Trading permission enabled and account channel verified.'};
+  },
+
   async runStrategy(id: string): Promise<{ ok: boolean; message: string }> {
     const s = get().strategies.find((x) => x.id === id);
     if (!s) return { ok: false, message: 'Strategy not found.' };
@@ -983,6 +1022,7 @@ interface Actions {
   saveStrategy: (s: Strategy) => Promise<{ ok: boolean; message: string }>;
   deleteStrategy: (id: string) => Promise<void>;
   setActiveStrategy: (id: string | null) => void;
+  authorizeConfirmedRun: (loginid:string, acknowledgeReal:boolean) => Promise<{ok:boolean;message:string}>;
   runStrategy: (id: string) => Promise<{ ok: boolean; message: string }>;
   pauseBot: () => void;
   resumeBot: () => void;

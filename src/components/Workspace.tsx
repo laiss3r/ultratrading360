@@ -8,7 +8,7 @@ import { useApp } from '@/state/store';
 import { effectiveStrategyLimits } from '@/lib/engine/strategies';
 import type { Quote } from '@/lib/engine/provider';
 import { ExecutionConsole, BrokerTransactions } from './ExecutionConsole';
-import { Button, Empty, Notice, Panel } from './ui';
+import { Button, Empty, Notice, Panel, Toggle } from './ui';
 
 export const money = (value: number, currency = 'USD') => `${value.toFixed(2)} ${currency}`;
 export const signed = (value: number) => `${value >= 0 ? '+' : ''}${value.toFixed(2)}`;
@@ -61,21 +61,26 @@ export function RunButton({ strategyId, prepare, children = 'Run strategy' }: { 
   const [confirm, setConfirm] = useState(false);
   const [message, setMessage] = useState('');
   const [pending, setPending] = useState(false);
+  const [confirmedAccount,setConfirmedAccount] = useState('');
+  const [acknowledgeReal,setAcknowledgeReal] = useState(false);
+  const acknowledged = useApp((s)=>s.settings.realTradingAcknowledged && s.settings.acknowledgedAccountLoginid===s.session?.loginid);
   const session = useApp((s)=>s.session);
   const strategy = useApp((s)=>s.strategies.find((x)=>x.id===currentId));
   const globalLimits = useApp((s)=>s.settings.limits);
   const limits = strategy ? effectiveStrategyLimits(globalLimits, strategy) : null;
+  const visibleMessage = globalLimits.tradingEnabled && message.startsWith('Trading is disabled') ? '' : message;
   const open = async () => {
+    setConfirmedAccount(useApp.getState().session?.loginid ?? '');setAcknowledgeReal(false);
     setMessage('');
     try { if (prepare) { setPending(true); setPreparedId(await prepare()); } setConfirm(true); }
     catch (e) { setMessage((e as Error).message); } finally { setPending(false); }
   };
   const run = async () => {
     setPending(true); setMessage('');
-    try { const result = await useApp.getState().runStrategy(currentId ?? ''); if(result.ok) setConfirm(false); else setMessage(result.message); }
+    try { const permission = await useApp.getState().authorizeConfirmedRun(confirmedAccount,acknowledgeReal);if(!permission.ok){setMessage(permission.message);return;}const result = await useApp.getState().runStrategy(currentId ?? ''); if(result.ok) setConfirm(false); else setMessage(result.message); }
     catch(e) { setMessage((e as Error).message); } finally { setPending(false); }
   };
-  return <><Button busy={pending} onClick={()=>void open()}><Play size={14}/>{children}</Button>{message&&!confirm&&<Notice tone="error">{message}</Notice>}{confirm && createPortal(<div className="modal-backdrop" onClick={()=>!pending&&setConfirm(false)}><div role="dialog" aria-modal="true" aria-labelledby={`confirm-${currentId}`} className="confirm-dialog" onClick={(e)=>e.stopPropagation()}><span className="eyebrow">CONFIRM BEFORE TRADING</span><h2 id={`confirm-${currentId}`}>{strategy?.name ?? 'Run strategy'}</h2><p>This starts genuine Deriv orders on <strong>{session?.loginid ? `${session.loginid} (${session.isVirtual?'Demo':'REAL MONEY'})` : 'no connected account'}</strong>. Open contracts may still settle after stopping.</p><dl className="detail-list"><div><dt>Base stake</dt><dd>{strategy?money(strategy.stake,strategy.currency):'—'}</dd></div><div><dt>Contract</dt><dd>{strategy?.contractType}{strategy?.barrier!==undefined?` · ${strategy.barrier}`:''}</dd></div><div><dt>Duration</dt><dd>{strategy?.duration} {strategy?.durationUnit==='t'?'ticks':strategy?.durationUnit}</dd></div><div><dt>Maximum entries</dt><dd>{limits?.maxTrades}</dd></div><div><dt>Profit target / stop loss</dt><dd>{limits?.maxSessionProfit || 'Off'} / {limits?.maxSessionLoss}</dd></div><div><dt>Stake plan / maximum stake</dt><dd>{strategy?.progression?.kind ?? 'Fixed'} / {limits?.maxStake}</dd></div>{strategy?.contractRotation&&<div><dt>Recovery contract</dt><dd>{strategy.contractRotation.recovery.contractType} · {strategy.contractRotation.mode}</dd></div>}</dl>{(strategy?.signalGate||strategy?.name.startsWith('Overlord ·'))&&<Notice>Signal-gated on both Demo and Real: waits for held-out and new live evidence, then checks the actual payout. No signal means no buy.</Notice>}{message&&<Notice tone="error">{message}</Notice>}<div className="button-row"><Button busy={pending} onClick={()=>void run()}>Confirm & run</Button><Button variant="secondary" disabled={pending} onClick={()=>setConfirm(false)}>Cancel</Button></div><Link className="text-link" href="/risk" onClick={()=>setConfirm(false)}>Review trading permissions →</Link></div></div>, document.body)}</>;
+  return <><Button busy={pending} onClick={()=>void open()}><Play size={14}/>{children}</Button>{visibleMessage&&!confirm&&<Notice tone="error">{visibleMessage}</Notice>}{confirm && createPortal(<div className="modal-backdrop" onClick={()=>!pending&&setConfirm(false)}><div role="dialog" aria-modal="true" aria-labelledby={`confirm-${currentId}`} className="confirm-dialog" onClick={(e)=>e.stopPropagation()}><span className="eyebrow">CONFIRM BEFORE TRADING</span><h2 id={`confirm-${currentId}`}>{strategy?.name ?? 'Run strategy'}</h2><p>This starts genuine Deriv orders on <strong>{session?.loginid ? `${session.loginid} (${session.isVirtual?'Demo':'REAL MONEY'})` : 'no connected account'}</strong>. Open contracts may still settle after stopping.</p><dl className="detail-list"><div><dt>Base stake</dt><dd>{strategy?money(strategy.stake,strategy.currency):'—'}</dd></div><div><dt>Contract</dt><dd>{strategy?.contractType}{strategy?.barrier!==undefined?` · ${strategy.barrier}`:''}</dd></div><div><dt>Duration</dt><dd>{strategy?.duration} {strategy?.durationUnit==='t'?'ticks':strategy?.durationUnit}</dd></div><div><dt>Maximum entries</dt><dd>{limits?.maxTrades}</dd></div><div><dt>Profit target / stop loss</dt><dd>{limits?.maxSessionProfit || 'Off'} / {limits?.maxSessionLoss}</dd></div><div><dt>Stake plan / maximum stake</dt><dd>{strategy?.progression?.kind ?? 'Fixed'} / {limits?.maxStake}</dd></div>{strategy?.contractRotation&&<div><dt>Recovery contract</dt><dd>{strategy.contractRotation.recovery.contractType} · {strategy.contractRotation.mode}</dd></div>}</dl>{(strategy?.signalGate||strategy?.name.startsWith('Overlord ·'))&&<Notice>Signal-gated on both Demo and Real: waits for held-out and new live evidence, then checks the actual payout. No signal means no buy.</Notice>}<Notice>{globalLimits.tradingEnabled ? 'Trading permission is ON.' : 'Confirm & run will enable trading for this browser.'} The bot starts only after Deriv verifies the selected account, and waits for qualified live conditions.</Notice>{session?.loginid&&!session.isVirtual&&!acknowledged&&<Toggle label="I acknowledge real-money risk for this selected account" checked={acknowledgeReal} onChange={setAcknowledgeReal}/>}<p className="micro muted">{session?.isVirtual?'Demo uses virtual funds; Real-money acknowledgement is not required.':'Real acknowledgement applies only to the confirmed account.'}</p>{visibleMessage&&<Notice tone="error">{visibleMessage}</Notice>}<div className="button-row"><Button busy={pending} onClick={()=>void run()}>Confirm & run</Button><Button variant="secondary" disabled={pending} onClick={()=>setConfirm(false)}>Cancel</Button></div><Link className="text-link" href="/risk" onClick={()=>setConfirm(false)}>Review trading permissions →</Link></div></div>, document.body)}</>;
 }
 
 export function SessionRail() {

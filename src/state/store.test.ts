@@ -4,6 +4,7 @@ vi.mock('@/lib/deriv/browserLegacyWs',()=>({runClassicDiscovery:vi.fn()}));
 import { runClassicDiscovery } from '@/lib/deriv/browserLegacyWs';
 import { useApp } from './store';
 import { DEFAULT_SETTINGS } from '@/lib/persistence/db';
+import * as persistence from '@/lib/persistence/db';
 import { createStrategy } from '@/lib/engine/strategies';
 import type { AuthSession } from '@/lib/deriv/types';
 import { DerivProvider, type MarketProvider } from '@/lib/engine/provider';
@@ -130,4 +131,49 @@ it('reports empty REST discovery without reopening sockets or leaving busy set',
  useApp.setState({session:{...real,loginid:''},accounts:[]});
  vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify({ok:true,accounts:[],message:'Migration pending',diagnostics:{httpStatus:200,returned:0,accepted:0,rejected:0,migration:'pending',legacyMappings:1,checkedAt:1}}))));
  const result=await useApp.getState().syncBalances();expect(result.message).toBe('Migration pending');expect(useApp.getState().session?.accountDiagnostics?.migration).toBe('pending');expect(useApp.getState().busy).toBeNull();expect(runClassicDiscovery).not.toHaveBeenCalled();
+});
+
+describe('explicit run confirmation permission handshake',()=>{
+ const demo={...real,loginid:'DOT_CONFIRMED',isVirtual:true};
+ it('enables Demo on explicit confirmation without pretending Real acknowledgement is required',async()=>{
+  useApp.setState({session:demo,tradingLoginid:demo.loginid,bot:null,botState:'idle'});
+  expect(useApp.getState().settings.limits.tradingEnabled).toBe(false);
+  expect((await useApp.getState().authorizeConfirmedRun(demo.loginid,false)).ok).toBe(true);
+  expect(useApp.getState().settings.limits.tradingEnabled).toBe(true);expect(useApp.getState().settings.realTradingAcknowledged).toBe(false);expect(useApp.getState().bot).toBeNull();
+ });
+ it('does not auto-acknowledge Real or enable it without the account-specific confirmation',async()=>{
+  useApp.setState({session:real,tradingLoginid:real.loginid});
+  expect((await useApp.getState().authorizeConfirmedRun(real.loginid,false)).ok).toBe(false);expect(useApp.getState().settings.limits.tradingEnabled).toBe(false);expect(useApp.getState().settings.realTradingAcknowledged).toBe(false);
+  expect((await useApp.getState().authorizeConfirmedRun(real.loginid,true)).ok).toBe(true);expect(useApp.getState().settings.acknowledgedAccountLoginid).toBe(real.loginid);
+ });
+ it('refuses changed or empty account identities',async()=>{
+  useApp.setState({session:demo,tradingLoginid:demo.loginid});expect((await useApp.getState().authorizeConfirmedRun('ROT_OLD',true)).ok).toBe(false);expect((await useApp.getState().authorizeConfirmedRun('',true)).ok).toBe(false);expect(useApp.getState().settings.limits.tradingEnabled).toBe(false);
+ });
+ it('connects and verifies the selected account rather than bypassing the broker gate',async()=>{
+  const attachTradingSocket=vi.fn(async()=>{useApp.setState({tradingMessage:'Broker unavailable'});});useApp.setState({session:demo,tradingLoginid:null,attachTradingSocket});
+  const result=await useApp.getState().authorizeConfirmedRun(demo.loginid,false);expect(attachTradingSocket).toHaveBeenCalledWith('deriv_demo');expect(result.ok).toBe(false);expect(result.message).toBe('Broker unavailable');expect(useApp.getState().bot).toBeNull();
+ });
+ it('respects emergency stop while the trading connection is being verified',async()=>{
+  const attachTradingSocket=vi.fn(async()=>{useApp.setState({tradingLoginid:demo.loginid});await useApp.getState().setSettings({limits:{...useApp.getState().settings.limits,tradingEnabled:false}});});useApp.setState({session:demo,tradingLoginid:null,attachTradingSocket});
+  expect((await useApp.getState().authorizeConfirmedRun(demo.loginid,false)).ok).toBe(false);expect(useApp.getState().settings.limits.tradingEnabled).toBe(false);
+ });
+});
+
+it('a delayed workspace restoration cannot overwrite a permission the user has just enabled',async()=>{
+ let release!:(value:typeof DEFAULT_SETTINGS)=>void;
+ const read=vi.spyOn(persistence,'loadSettings').mockImplementation(()=>new Promise(resolve=>{release=resolve;}));
+ useApp.setState({hydrated:false,loadConfig:vi.fn(async()=>{}),refreshSession:vi.fn(async()=>{}),startUpkeep:vi.fn(),applyMode:vi.fn(async()=>{})});
+ try{
+  const first=useApp.getState().hydrate();const second=useApp.getState().hydrate();
+  await useApp.getState().setSettings({limits:{...DEFAULT_SETTINGS.limits,tradingEnabled:true}});
+  release({...DEFAULT_SETTINGS,limits:{...DEFAULT_SETTINGS.limits,tradingEnabled:false}});await Promise.all([first,second]);
+  expect(read).toHaveBeenCalledOnce();expect(useApp.getState().settings.limits.tradingEnabled).toBe(true);expect(useApp.getState().risk.limits.tradingEnabled).toBe(true);
+ }finally{read.mockRestore();}
+});
+it('persists rapid permission changes in order so an older write cannot undo Stop',async()=>{
+ let release!:()=>void;const save=vi.mocked(persistence.saveSettings);save.mockImplementationOnce(()=>new Promise<void>(resolve=>{release=resolve;}));
+ const on=useApp.getState().setSettings({limits:{...DEFAULT_SETTINGS.limits,tradingEnabled:true}});
+ await vi.waitFor(()=>expect(save).toHaveBeenCalledTimes(1));
+ const off=useApp.getState().setSettings({limits:{...DEFAULT_SETTINGS.limits,tradingEnabled:false}});
+ expect(save).toHaveBeenCalledTimes(1);release();await Promise.all([on,off]);expect(save).toHaveBeenCalledTimes(2);expect(save.mock.calls[1][0].limits.tradingEnabled).toBe(false);expect(useApp.getState().settings.limits.tradingEnabled).toBe(false);
 });
