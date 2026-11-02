@@ -16,6 +16,7 @@ export interface BuyRequest {
 }
 
 export interface ExecutedTrade {
+  buyAckMs?:number;repriceMs?:number;
   contractId: number;
   proposalId: string;
   buyPrice: number;
@@ -54,6 +55,7 @@ export class TradingService {
 
     // The provider may forward its own immutable, single-use broker quote (<=1 second old).
     // Otherwise request a fresh quote; payout/price/permission checks below always run.
+    const pricingAt=performance.now();
     const { proposal } = opts.verifiedProposal?{proposal:opts.verifiedProposal}:await this.contracts.proposal({
       underlying: req.underlying,
       contractType: req.contractType,
@@ -65,6 +67,7 @@ export class TradingService {
       barrier: req.barrier,
     });
 
+    const repriceMs=opts.verifiedProposal?0:performance.now()-pricingAt;
     // 2. Verify the quote is still within tolerance before committing funds.
     if (opts.maxAcceptablePrice !== undefined && proposal.ask_price > opts.maxAcceptablePrice) {
       throw new Error(
@@ -83,6 +86,7 @@ export class TradingService {
     if (opts.shouldExecute && !opts.shouldExecute(proposal)) throw new OrderCancelledError();
     // 3. Buy by proposal id.
     let res: { buy: { buy_price: number; contract_id: number; payout: number; longcode: string; currency: string; start_time?: number; purchase_time?: number; transaction_id?:number|string } };
+    const sentAt=performance.now();
     try {
       res = await this.client.send({ buy: proposal.id, price: proposal.ask_price });
     } catch (e) {
@@ -91,10 +95,11 @@ export class TradingService {
       }
       throw e;
     }
+    const buyAckMs=performance.now()-sentAt;
     const b = res.buy;
     const buyPrice=requiredBrokerNumber(b.buy_price,'executed buy price'),payout=requiredBrokerNumber(b.payout,'potential payout');
     return {
-      contractId: b.contract_id,
+      contractId: b.contract_id, buyAckMs,repriceMs,
       transactionId:b.transaction_id===undefined?undefined:String(b.transaction_id),
       proposalId: proposal.id,
       buyPrice,

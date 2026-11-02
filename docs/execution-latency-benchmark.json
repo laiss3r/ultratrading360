@@ -1,0 +1,30 @@
+{
+  "synthetic": true,
+  "baselineCommit": "37897793f5a229a62cbf69b54312288e4eec3597",
+  "conditions": {
+    "capabilityDelayMs": 60,
+    "historyDelayMs": 90,
+    "receiptProgressFrames": 1000,
+    "retainedTrades": 100,
+    "historyRows": 5000,
+    "lifecycleRows": 500
+  },
+  "startupMs": {
+    "before": 152.643306,
+    "after": 90.85925600000002
+  },
+  "receiptUpdates": {
+    "before": {
+      "ms": 242.88455299999998,
+      "writes": 1000
+    },
+    "after": {
+      "ms": 6.969033999999965,
+      "writes": 1
+    }
+  },
+  "ledgerMedianMs": {
+    "before": 17.341816999999992,
+    "after": 20.34295099999997
+  }
+}

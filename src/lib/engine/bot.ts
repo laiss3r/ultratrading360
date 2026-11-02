@@ -14,6 +14,7 @@ import { progressionStake } from './progressions';
 export type BotState = 'idle' | 'starting' | 'running' | 'paused' | 'stopping' | 'stopped' | 'halted' | 'error';
 
 export interface TradeRecord {
+  timing?:import('./execution').ExecutionTiming;
   id: string;
   runId?: string;
   accountLoginid?: string;
@@ -350,7 +351,7 @@ export class TradingBot {
         symbol: this.strategy.market,
         contractType: leg.contractType,
         barrier: priced.barrier,
-        potentialPayout:settled.potentialPayout,pipSize:settled.pipSize,longcode:settled.longcode,buyTransactionId:settled.buyTransactionId,sellTransactionId:settled.sellTransactionId,dateExpiry:settled.dateExpiry,
+        timing:settled.timing,potentialPayout:settled.potentialPayout,pipSize:settled.pipSize,longcode:settled.longcode,buyTransactionId:settled.buyTransactionId,sellTransactionId:settled.sellTransactionId,dateExpiry:settled.dateExpiry,
         stake: settled.stake,
         payout: settled.payout,
         profit: settled.profit,

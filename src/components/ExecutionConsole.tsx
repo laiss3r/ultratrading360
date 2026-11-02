@@ -1,5 +1,5 @@
 'use client';
-import {useEffect,useState,type ReactNode} from 'react';
+import {useEffect,useState,useMemo,useCallback,type ReactNode} from 'react';
 import {ChevronUp,Pause,Play,Square} from 'lucide-react';
 import {useApp} from '@/state/store';
 import type {TradeRecord} from '@/lib/engine/bot';
@@ -19,13 +19,18 @@ export function useSessionView(){
  const hydrated=useApp(s=>s.hydrated);
  const state=useApp(s=>s.botState),detail=useApp(s=>s.botDetail),bot=useApp(s=>s.bot),execution=useApp(s=>s.execution),signal=useApp(s=>s.botSignal),journal=useApp(s=>s.executionJournal),trades=useApp(s=>s.trades),session=useApp(s=>s.session),mode=useApp(s=>s.settings.mode),resets=useApp(s=>s.sessionResets),symbols=useApp(s=>s.symbols);
  const account=session?.loginid,resetAt=resets?.[`${mode}:${account??'none'}`]??0;
- const accountOwn=(e:{mode:string;accountLoginid?:string})=>!!account&&e.accountLoginid===account&&e.mode===mode;
- const own=(e:{mode:string;accountLoginid?:string;at?:number;closedAt?:number})=>accountOwn(e)&&(e.at??e.closedAt??0)>resetAt;
- const entries=(journal??[]).filter(own),active=execution&&own(execution)?execution:null;
- const accountTrades=uniqueSessionTrades((trades??[]).filter(accountOwn)),recent=accountTrades.filter(own);
+ const accountOwn=useCallback((e:{mode:string;accountLoginid?:string})=>!!account&&e.accountLoginid===account&&e.mode===mode,[account,mode]);
+ const own=useCallback((e:{mode:string;accountLoginid?:string;at?:number;closedAt?:number})=>accountOwn(e)&&(e.at??e.closedAt??0)>resetAt,[accountOwn,resetAt]);
+ const accountJournal=useMemo(()=>(journal??[]).filter(accountOwn),[journal,accountOwn]);
+ const entries=useMemo(()=>accountJournal.filter(own),[accountJournal,own]);
+ const active=execution&&own(execution)?execution:null;
+ const accountTrades=useMemo(()=>uniqueSessionTrades((trades??[]).filter(accountOwn)),[trades,accountOwn]);
+ const recent=useMemo(()=>accountTrades.filter(own),[accountTrades,own]);
  const runId=active?.runId??entries[0]?.runId??recent[0]?.runId;
- const records=recent.filter(t=>!!runId&&t.runId===runId),last=records.find(t=>!t.error),metrics=computeMetrics(records,0);
- const unresolved=pendingEliteEvents(journal??[],trades??[],account,mode);
+ const records=useMemo(()=>recent.filter(t=>!!runId&&t.runId===runId),[recent,runId]);
+ const last=records.find(t=>!t.error);
+ const metrics=useMemo(()=>computeMetrics(records,0),[records]);
+ const unresolved=useMemo(()=>pendingEliteEvents(journal??[],trades??[],account,mode),[journal,trades,account,mode]);
  const fromBot=bot&&'getOpenExecutions' in bot&&typeof bot.getOpenExecutions==='function'?bot.getOpenExecutions():unresolved;
  const openContracts:ExecutionEvent[]=fromBot.filter(e=>own(e)&&e.runId===runId&&!!e.contractId&&!records.some(t=>!t.error&&t.contractId===e.contractId));
  if(!openContracts.length&&active?.contractId&&active.runId===runId&&['open','stopping','halted','error'].includes(active.phase)&&!records.some(t=>!t.error&&t.contractId===active.contractId))openContracts.push(active);
@@ -35,7 +40,7 @@ export function useSessionView(){
  const result=last?(last.profit>0?'Won':last.profit<0?'Lost':'Closed'):null;
  const stage=openContracts.length>1&&state!=='stopping'?`${openContracts.length} contracts open`:state==='stopping'?'Stopping after settlement':state==='paused'?'Paused':state==='error'?'Execution error':current?.contractId&&current.phase==='halted'?'Outcome unresolved':openContracts.length===1?'Contract bought':running?(active?.phase==='open'?'Contract bought':active?.phase==='buying'?'Buying contract':active?.phase==='pricing'?'Checking broker payout':state==='starting'?'Preparing session':result??'Waiting for signal'):result??(state==='halted'?'Stopped by risk':state==='stopped'?'Stopped':'Ready');
  const marketName=(symbol:string)=>(symbols??[]).find(s=>s.underlying_symbol===symbol)?.underlying_symbol_name??`Market ${symbol} (name unavailable)`;
- return {hydrated,openContracts,unresolved,state,detail,bot,active,signal,session,mode,account,entries,accountJournal:(journal??[]).filter(accountOwn),accountTrades,runId,records,last,metrics,current,pending,running,accepted,stage,marketName};
+ return {hydrated,openContracts,unresolved,state,detail,bot,active,signal,session,mode,account,entries,accountJournal,accountTrades,runId,records,last,metrics,current,pending,running,accepted,stage,marketName};
 }
 
 function MarketGlyph({symbol}:{symbol:string}){const index=/1HZ(\d+)|R_(\d+)/.exec(symbol);return <span className="market-glyph" aria-hidden="true"><span>{index?.[1]??index?.[2]??'•'}</span>{symbol.startsWith('1HZ')&&<i>1s</i>}<svg width="35" height="28" viewBox="0 0 35 28"><g stroke="#2a9dab" strokeWidth="2"><path d="M5 2v23M13 7v20M21 0v21M29 3v24"/><path strokeWidth="5" d="M5 7v11M13 14v8M21 5v10M29 8v13"/></g></svg></span>}
@@ -72,8 +77,8 @@ export function ExecutionConsole({compact=false,runControl,global=false,settings
  const [includePast,setIncludePast]=useState(false),[filter,setFilter]=useState(global?'settlements':'all'),[notice,setNotice]=useState(''),[clock,setClock]=useState(0),[limit,setLimit]=useState(150);
  useEffect(()=>{const timer=setInterval(()=>setClock(Date.now()),1000);return()=>clearInterval(timer);},[]);
  const transactions=includePast?m.accountTrades:m.records;
- const activity=includePast?m.accountJournal:m.entries.filter(e=>e.runId===m.runId);
- const {events:journalRecords,results:resultEntries}=sessionJournal(transactions,activity);
+ const activity=useMemo(()=>includePast?m.accountJournal:m.entries.filter(e=>e.runId===m.runId),[includePast,m.accountJournal,m.entries,m.runId]);
+ const {events:journalRecords,results:resultEntries}=useMemo(()=>sessionJournal(transactions,activity),[transactions,activity]);
  const openStake=m.openContracts.reduce((sum,e)=>sum+(e.stake??0),0);
  const currency=m.session?.currency??'';
  const visible=filter==='settlements'?resultEntries:journalRecords.filter(e=>filter==='all'||(filter==='signals'?['preparing','waiting','qualified'].includes(e.phase):filter==='errors'?['error','halted'].includes(e.phase):['pricing','buying','open','settled','stopping','stopped'].includes(e.phase)));
@@ -92,7 +97,7 @@ export function ExecutionConsole({compact=false,runControl,global=false,settings
   {tab==='summary'&&<div className="stack" style={{gap:12}}>
    {(m.openContracts.length?m.openContracts:[null]).map((open,index)=>{const summary=open??m.last,summaryProfit=open?open.profit:m.last?.profit;return summary?<article key={open?.contractId??index} className={`contract-summary ${summaryProfit===undefined?'':summaryProfit>0?'is-winning':summaryProfit<0?'is-losing':''}`}><header><div className="reference-contract-title"><MarketGlyph symbol={summary.symbol}/><strong>{m.marketName(summary.symbol)}</strong><span className="reference-contract-name"><ContractGlyph/>{contract(summary.contractType,summary.barrier)}</span></div><span className="badge badge-neutral">{open?(m.state==='stopping'?'Stopping':'Open'):'Closed'}</span></header><span className="badge badge-blue">{summary.currency??m.session?.currency??'—'}</span><div className="contract-facts"><div><span>Contract profit/loss</span><strong className={summaryProfit===undefined?'':summaryProfit>=0?'positive':'negative'}>{summaryProfit===undefined?'—':signed(summaryProfit)}</strong></div><div><span>Contract value</span><strong>{cash(open?open.contractValue:m.last?.payout)}</strong></div><div><span>Stake</span><strong>{cash(summary.stake)}</strong></div><div><span>Potential payout</span><strong>{cash(summary.potentialPayout)}</strong></div></div>
     {open&&<p className="micro contract-tick-status">{open.recordedTicks===undefined?'Waiting for broker tick progress':`Tick ${open.recordedTicks}${open.totalTicks===undefined?'':` / ${open.totalTicks}`}`}</p>}
-    <details className="broker-summary-details"><summary>View contract details</summary><small>{summary.strategyName} · {summary.duration??'—'} {summary.durationUnit??''}</small><dl className="detail-list"><div><dt>Broker contract</dt><dd>{summary.contractId??'Not recorded'}</dd></div><div><dt>Entry / exit spot</dt><dd>{number(open?open.entryPrice:m.last?.entryPrice,summary.pipSize)} / {open?'Pending':number(m.last?.exitPrice,summary.pipSize)}</dd></div>{open&&<div><dt>Latest broker spot</dt><dd>{number(open.currentSpot,open.pipSize)}</dd></div>}<div><dt>Opened</dt><dd>{date(open?open.dateStart:m.last?.openedAt)}</dd></div><div><dt>{open?'Expiry':'Closed'}</dt><dd>{date(open?open.dateExpiry:m.last?.closedAt)}</dd></div></dl></details>
+    <details className="broker-summary-details"><summary>View contract details</summary>{summary.timing&&<p className="execution-latency">Measured execution: pricing {Math.round(summary.timing.proposalMs)} ms · broker acknowledgement {Math.round(summary.timing.buyAckMs)} ms · quote-to-receipt {Math.round(summary.timing.quoteToReceiptMs)} ms. Broker/network latency is outside this app’s control.</p>}<small>{summary.strategyName} · {summary.duration??'—'} {summary.durationUnit??''}</small><dl className="detail-list"><div><dt>Broker contract</dt><dd>{summary.contractId??'Not recorded'}</dd></div><div><dt>Entry / exit spot</dt><dd>{number(open?open.entryPrice:m.last?.entryPrice,summary.pipSize)} / {open?'Pending':number(m.last?.exitPrice,summary.pipSize)}</dd></div>{open&&<div><dt>Latest broker spot</dt><dd>{number(open.currentSpot,open.pipSize)}</dd></div>}<div><dt>Opened</dt><dd>{date(open?open.dateStart:m.last?.openedAt)}</dd></div><div><dt>{open?'Expiry':'Closed'}</dt><dd>{date(open?open.dateExpiry:m.last?.closedAt)}</dd></div></dl></details>
     <p className="resale-status">{open?(open.canSell===false?'Resale not offered':open.canSell===true?'Resale offered by broker':'Resale availability not reported'):'Contract closed'}</p>{summary.longcode&&<details><summary className="micro">Contract description</summary><p className="micro">{summary.longcode}</p></details>}
    </article>:<Empty title="Waiting for an entry">No purchased contract is inferred from a signal or a proposal.</Empty>;})}
    {m.signal&&m.running&&<details className="entry-evidence"><summary className="micro">Entry decision · {staleSignal?'expired':m.signal.status}</summary><Notice>{staleSignal?'Signal expired: waiting for fresh live evidence.':m.signal.reason}<small style={{display:'block'}}>Current leg {m.signal.contractType} · pattern {m.signal.pattern} · held-out {m.signal.validation.hits}/{m.signal.validation.total} · new live {m.signal.forward.hits}/{m.signal.forward.total}. Insufficient evidence does not permit a purchase.</small></Notice></details>}

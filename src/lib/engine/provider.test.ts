@@ -52,3 +52,21 @@ describe('single-use fresh broker pricing',()=>{
   await p.execute(priced,{authorized:true,shouldExecute:permission});expect(price).toHaveBeenCalledTimes(age===0?1:2);expect(permission).toHaveBeenCalled();await expect(p.execute(priced,{authorized:true})).rejects.toThrow(/consumed/);
  });
 });
+
+describe('measured execution timing',()=>{
+ it.each([0,1500])('reports actual pricing (including refresh) and buy acknowledgement without settlement wait (%sms quote age)',async(age)=>{
+  const {ContractService}=await import('../deriv/contracts');const {TradingService}=await import('../deriv/trading');
+  const p=new DerivProvider('deriv_demo');vi.spyOn(p,'isConnected').mockReturnValue(true);
+  let clock=0;vi.spyOn(performance,'now').mockImplementation(()=>clock);
+  const proposal={id:'timed-quote',ask_price:1,payout:1.95,spot:100,spot_value:'100.00',date_start:1,date_expiry:2,longcode:'Measured test proposal'};
+  vi.spyOn(ContractService.prototype,'proposal').mockImplementation(async()=>{clock+=40;return {proposal,impliedProbability:1/1.95};});
+  vi.spyOn(DerivClient.prototype,'send').mockImplementation(async()=>{clock+=70;return {buy:{buy_price:1,contract_id:42,payout:1.95,longcode:'Test receipt',purchase_time:1,start_time:1}} as never;});
+  vi.spyOn(TradingService.prototype,'watchContract').mockImplementation(async()=>{clock+=3000;return {contract_id:42,profit:.95,buy_price:1,is_sold:1,status:'won'} as never;});
+  const now=Date.now();vi.spyOn(Date,'now').mockReturnValue(now);
+  const priced=await p.price({symbol:'R_10',contractType:'DIGITEVEN',stake:1,duration:1,durationUnit:'t',currency:'USD'});
+  clock+=age;vi.mocked(Date.now).mockReturnValue(now+age);const updates:import('./execution').ContractUpdate[]=[];
+  const result=await p.execute(priced,{authorized:true,onUpdate:u=>updates.push(u)});
+  const expected={proposalMs:age?80:40,buyAckMs:70,quoteToReceiptMs:age?1650:110};
+  expect(result.timing).toEqual(expected);expect(updates.find(u=>u.phase==='open')?.timing).toEqual(expected);expect(result.timing!.quoteToReceiptMs).toBeLessThan(clock);
+ });
+});

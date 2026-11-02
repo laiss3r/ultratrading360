@@ -852,7 +852,8 @@ export const useApp = create<State & Actions>()((set, get) => ({
     const real = !session.isVirtual;
     const alreadyAcknowledged = get().settings.realTradingAcknowledged && get().settings.acknowledgedAccountLoginid === loginid;
     if (real && !alreadyAcknowledged && !acknowledgeReal) return {ok:false,message:'Acknowledge the real-money risk for this selected account before confirming.'};
-    await get().setSettings({
+    // A verified, already-authorised Run needs no redundant IndexedDB settings round trip.
+    if(!get().settings.limits.tradingEnabled||(real&&!alreadyAcknowledged))await get().setSettings({
       limits:{...get().settings.limits,tradingEnabled:true},
       ...(real ? {realTradingAcknowledged:true,acknowledgedAccountLoginid:loginid} : {}),
     });
