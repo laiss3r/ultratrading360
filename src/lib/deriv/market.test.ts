@@ -15,7 +15,7 @@ it('pages the genuine 1,000-row cap to 5,000 and refreshes the newest seed',asyn
  });
  const service=new MarketDataService({send} as unknown as DerivClient,0);const progress=vi.fn();const result=await service.ticksHistory('R_10',5000,undefined,progress);
  expect(progress.mock.calls).toEqual([[1000,5000],[2000,5000],[3000,5000],[4000,5000],[5000,5000]]);
- expect(send).toHaveBeenCalledTimes(6);expect(send.mock.calls[1][0].end).toBe('9000');expect(send.mock.calls[4][0].end).toBe('6000');expect(send.mock.calls[5][0].end).toBe('latest');
+ expect(send).toHaveBeenCalledTimes(6);expect(send.mock.calls.every(([request])=>!('start' in request))).toBe(true);expect(send.mock.calls[1][0].end).toBe('9000');expect(send.mock.calls[4][0].end).toBe('6000');expect(send.mock.calls[5][0].end).toBe('latest');
  expect(result.ticks).toHaveLength(5000);expect(result.ticks[0].epoch).toBe(5003);expect(result.ticks.at(-1)?.epoch).toBe(10002);expect(result.pipSize).toBe(2);
  expect(result.ticks.every((tick,i,a)=>i===0||tick.epoch===a[i-1].epoch+1)).toBe(true);
 });
@@ -33,5 +33,17 @@ it('cancels rate-limit backoff without retrying an abandoned scan',async()=>{
   const rejected=expect(pending).rejects.toThrow('cancelled');
   await vi.advanceTimersByTimeAsync(1);expect(send).toHaveBeenCalledTimes(1);abort.abort();await rejected;
   await vi.runAllTimersAsync();expect(send).toHaveBeenCalledTimes(1);
+ }finally{vi.useRealTimers();}
+});
+it('reports actual broker rate-limit backoff without pretending history is progressing',async()=>{
+ vi.useFakeTimers();try{
+ const send=vi.fn().mockRejectedValueOnce(Error('RateLimit: ticks_history_expensive')).mockResolvedValue({pip_size:2,history:{times:[1],prices:[100.01]}}),progress=vi.fn();
+ const pending=new MarketDataService({send} as unknown as DerivClient,0).ticksHistory('R_10',1,undefined,progress);await vi.advanceTimersByTimeAsync(1);
+ expect(progress).toHaveBeenCalledWith(0,1,expect.stringContaining('waiting 5s'));expect(send).toHaveBeenCalledTimes(1);await vi.advanceTimersByTimeAsync(5000);await pending;expect(send).toHaveBeenCalledTimes(2);expect(progress).toHaveBeenLastCalledWith(1,1);
+ }finally{vi.useRealTimers();}
+});
+it('does not freeze the paced read queue when the device wall clock is corrected during a scan',async()=>{
+ vi.useFakeTimers();try{
+ const send=vi.fn(async()=>({pip_size:2,history:{times:[1],prices:[100.01]}})),service=new MarketDataService({send} as unknown as DerivClient,1200);await service.ticksHistory('R_10',1);vi.setSystemTime(Date.now()-120000);const next=service.ticksHistory('R_25',1);await vi.advanceTimersByTimeAsync(1199);expect(send).toHaveBeenCalledTimes(1);await vi.advanceTimersByTimeAsync(1);await next;expect(send).toHaveBeenCalledTimes(2);
  }finally{vi.useRealTimers();}
 });

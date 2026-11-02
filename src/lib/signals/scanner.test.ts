@@ -11,7 +11,7 @@ describe('stream-first real-time signal scanner',()=>{
  it('opens streams before history, caps concurrent seeds and cancels all work',async()=>{
   vi.useFakeTimers();const resolve:((q:Quote[])=>void)[]=[];const history=vi.fn(()=>new Promise<Quote[]>(r=>resolve.push(r))),dispose=vi.fn(),stream=vi.fn(async()=>dispose);
   const p={history,stream,isConnected:()=>true} as unknown as MarketProvider;const changed=vi.fn();const stop=watchSignals(p,[10,25,50,75,100].map(market),{contractType:'DIGITEVEN'},1,changed);
-  expect(stream).toHaveBeenCalledTimes(3);expect(history).not.toHaveBeenCalled();await flush();expect(stream).toHaveBeenCalledTimes(5);expect(history).toHaveBeenCalledTimes(3);
+  expect(stream).toHaveBeenCalledTimes(3);expect(history).not.toHaveBeenCalled();await flush();expect(stream).toHaveBeenCalledTimes(5);expect(history).toHaveBeenCalledTimes(1);
   stop();const count=changed.mock.calls.length;resolve.forEach(r=>r(hist('R_10')));await flush();expect(dispose).toHaveBeenCalledTimes(5);expect(changed).toHaveBeenCalledTimes(count);expect(vi.getTimerCount()).toBe(0);
  });
  it('disposes a stream that finishes opening after Stop',async()=>{
@@ -32,4 +32,28 @@ describe('stream-first real-time signal scanner',()=>{
  it('automatically reseeds after a live gap and blocks disconnected evidence',async()=>{
   vi.useFakeTimers();let tick!:(q:Quote)=>void,connected=true;let rows:WatchedSignal[]=[];const history=vi.fn(async(s:string)=>hist(s));const stop=watchSignals({history,isConnected:()=>connected,stream:async(_s:string,cb:typeof tick)=>{tick=cb;return ()=>{};}} as unknown as MarketProvider,[market(10)],{contractType:'DIGITEVEN'},1,r=>rows=r);await flush();tick(quote());await vi.advanceTimersByTimeAsync(10000);tick(quote());await flush();expect(history).toHaveBeenCalledTimes(2);connected=false;await vi.advanceTimersByTimeAsync(250);expect(rows[0].evidence?.status).toBe('stale');stop();expect(vi.getTimerCount()).toBe(0);
  });
+});
+
+it('finishes the first full seed before starting another while every stream is already open',async()=>{
+ vi.useFakeTimers();let finish!:(q:Quote[])=>void;let rows:WatchedSignal[]=[];
+ const history=vi.fn((symbol:string)=>new Promise<Quote[]>(r=>{finish=q=>r(q);void symbol;})),stream=vi.fn(async()=>()=>{});
+ const stop=watchSignals({history,stream,isConnected:()=>true} as unknown as MarketProvider,[market(10),market(25),market(50)],{contractType:'DIGITEVEN'},1,r=>rows=r);
+ await flush();expect(stream).toHaveBeenCalledTimes(3);expect(history).toHaveBeenCalledTimes(1);expect(history.mock.calls[0][0]).toBe('R_10');finish(hist('R_10'));await flush();expect(rows[0].phase).toBe('watching');expect(history).toHaveBeenCalledTimes(2);expect(history.mock.calls[1][0]).toBe('R_25');expect(rows[0].evidence?.forward.total).toBe(0);stop();expect(vi.getTimerCount()).toBe(0);
+});
+it.each([-120000,120000])('accepts genuine-time data with a skewed device clock (%sms) without weakening stale/future tick rejection',async(skew)=>{
+ vi.useFakeTimers();const broker=1793637000000;vi.setSystemTime(broker+skew);let tick!:(q:Quote)=>void;let rows:WatchedSignal[]=[];
+ const serverTime=vi.fn(async()=>broker),history=vi.fn(async(s:string)=>hist(s).map(q=>({...q,epoch:q.epoch-skew/1000})));
+ const stop=watchSignals({serverTime,history,isConnected:()=>true,stream:async(_s:string,cb:typeof tick)=>{tick=cb;return ()=>{};}} as unknown as MarketProvider,[market(10)],{contractType:'DIGITEVEN'},1,r=>rows=r);
+ await flush();expect(serverTime).toHaveBeenCalledOnce();expect(rows[0].phase).toBe('watching');tick(quote('R_10',broker/1000));tick(quote('R_10',broker/1000-6));tick(quote('R_10',broker/1000+3));await vi.advanceTimersByTimeAsync(250);expect(rows[0].liveTicks).toBe(1);expect(rows[0].clockSkewMs).toBeCloseTo(-skew,0);expect(rows[0].asOf).toBeCloseTo(broker+250,0);expect(rows[0].evidence?.status).not.toBe('stale');stop();expect(vi.getTimerCount()).toBe(0);
+});
+it('still rejects stale history against broker time when the device clock is wrong',async()=>{
+ vi.useFakeTimers();const broker=1793637000000;vi.setSystemTime(broker+120000);let rows:WatchedSignal[]=[];
+ const stop=watchSignals({serverTime:async()=>broker,isConnected:()=>true,stream:async()=>()=>{},history:async(s:string)=>hist(s).map(q=>({...q,epoch:q.epoch-180}))} as unknown as MarketProvider,[market(10)],{contractType:'DIGITEVEN'},1,r=>rows=r);await flush();expect(rows[0].phase).toBe('retrying');expect(rows[0].error).toMatch(/stale or future/);stop();expect(vi.getTimerCount()).toBe(0);
+});
+it('Stop during broker-clock verification cannot open streams or history',async()=>{
+ vi.useFakeTimers();let finish!:(n:number)=>void;const stream=vi.fn(),history=vi.fn();const stop=watchSignals({serverTime:()=>new Promise<number>(r=>finish=r),stream,history,isConnected:()=>true} as unknown as MarketProvider,[market(10)],{contractType:'DIGITEVEN'},1,vi.fn());stop();finish(Date.now());await flush();expect(stream).not.toHaveBeenCalled();expect(history).not.toHaveBeenCalled();expect(vi.getTimerCount()).toBe(0);
+});
+it('reports failed clock verification, retries read-only, and cancels retry on Stop',async()=>{
+ vi.useFakeTimers();const serverTime=vi.fn().mockRejectedValueOnce(Error('Clock unavailable')).mockResolvedValue(Date.now()),stream=vi.fn(async()=>()=>{});let rows:WatchedSignal[]=[];
+ const stop=watchSignals({serverTime,stream,history:async(s:string)=>hist(s),isConnected:()=>true} as unknown as MarketProvider,[market(10)],{contractType:'DIGITEVEN'},1,r=>rows=r);await flush();expect(rows[0].phase).toBe('retrying');expect(rows[0].error).toContain('Clock verification failed');expect(stream).not.toHaveBeenCalled();stop();await vi.advanceTimersByTimeAsync(3000);expect(serverTime).toHaveBeenCalledOnce();expect(vi.getTimerCount()).toBe(0);
 });

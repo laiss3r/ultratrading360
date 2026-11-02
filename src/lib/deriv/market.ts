@@ -10,7 +10,7 @@ export class MarketDataService {
   constructor(private client: DerivClient, private historyPacingMs = 1200) {}
 
   /** Shared pacing/backoff is for READS only, never proposal/buy retries. */
-  private historyRequest(request: Record<string, unknown>, signal?: AbortSignal): Promise<TickHistoryResponse & { msg_type: string }> {
+  private historyRequest(request: Record<string, unknown>, signal?: AbortSignal, onRetry?:(delayMs:number)=>void): Promise<TickHistoryResponse & { msg_type: string }> {
     const pause = (ms: number) => new Promise<void>((resolve, reject) => {
       if (signal?.aborted) { reject(new Error('History request cancelled.')); return; }
       const abort = () => { clearTimeout(timer); signal?.removeEventListener('abort', abort); reject(new Error('History request cancelled.')); };
@@ -19,7 +19,7 @@ export class MarketDataService {
     });
     const task = this.historyQueue.then(async () => {
       if (signal?.aborted) throw new Error('History request cancelled.');
-      const wait = Math.max(0, this.nextHistoryAt - Date.now());
+      const wait = Math.max(0, this.nextHistoryAt - performance.now());
       if (wait) await pause(wait);
       try {
         for (let attempt = 0; ; attempt++) {
@@ -30,10 +30,11 @@ export class MarketDataService {
           }
           catch (error) {
             if (attempt >= 4 || !/rate.?limit/i.test((error as Error).message)) throw error;
-            await pause(5000 * 2 ** attempt);
+            const delayMs=5000 * 2 ** attempt;onRetry?.(delayMs);
+            await pause(delayMs);
           }
         }
-      } finally { this.nextHistoryAt = Date.now() + this.historyPacingMs; }
+      } finally { this.nextHistoryAt = performance.now() + this.historyPacingMs; }
     });
     this.historyQueue = task.then(() => {}, () => {});
     return task;
@@ -53,14 +54,18 @@ export class MarketDataService {
    * Historical ticks. Returns quotes paired with epochs and the instrument's pip_size,
    * which is required for correct digit extraction.
    */
-  async ticksHistory(symbol: string, count = 1000, signal?: AbortSignal, onProgress?: (loaded:number,total:number)=>void): Promise<{ ticks: Tick[]; pipSize: number }> {
+  async ticksHistory(symbol: string, count = 1000, signal?: AbortSignal, onProgress?: (loaded:number,total:number,status?:string)=>void): Promise<{ ticks: Tick[]; pipSize: number }> {
     if (!Number.isInteger(count) || count < 1 || count > 5000) throw new Error('Tick history count must be between 1 and 5000.');
     // The current public API can silently cap a response at 1,000 rows, even
     // when count=5000. Page backwards by the broker epoch, never fabricate rows.
+    let reportedLoaded=0;
+    // No start=1 (1970): it needlessly widens the query and can hit the
+    // broker's expensive-history limit. The documented default is one day,
+    // sufficient for 5,000 ticks on the supported 1/2-second markets.
     const page = async (end: string, size: number) => {
       const res = await this.historyRequest({
-        ticks_history: symbol, adjust_start_time: 1, count: size, end, start: 1, style: 'ticks',
-      }, signal);
+        ticks_history: symbol, adjust_start_time: 1, count: size, end, style: 'ticks',
+      }, signal,delayMs=>onProgress?.(reportedLoaded,count,`Broker history rate limit; waiting ${delayMs/1000}s before a read-only retry.`));
       const prices = res.history?.prices ?? [], times = res.history?.times ?? [];
       const pipSize = res.pip_size ?? 2;
       if (prices.length !== times.length || times.some((epoch, i) => !Number.isFinite(epoch) || (i > 0 && epoch < times[i - 1]))) throw new Error('Broker returned invalid tick history epochs.');
@@ -68,7 +73,7 @@ export class MarketDataService {
     };
     const first = await page('latest', Math.min(count, 1000));
     let ticks = first.ticks;
-    onProgress?.(Math.min(count,ticks.length),count);
+    reportedLoaded=Math.min(count,ticks.length);onProgress?.(reportedLoaded,count);
     for (let attempts = 0; ticks.length < count && ticks.length && attempts < 5; attempts++) {
       const oldest = ticks[0].epoch;
       const older = await page(String(oldest - 1), Math.min(count - ticks.length, 1000));
@@ -76,7 +81,7 @@ export class MarketDataService {
       if (!older.ticks.length) break;
       if (older.ticks.some((tick) => tick.epoch >= oldest)) throw new Error('Broker did not honour the historical page boundary.');
       ticks = [...older.ticks, ...ticks];
-      onProgress?.(Math.min(count,ticks.length),count);
+      reportedLoaded=Math.min(count,ticks.length);onProgress?.(reportedLoaded,count);
     }
     if (count > 1000) {
       // Paging old data must not leave the seed stale before streaming starts.

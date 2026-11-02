@@ -1,0 +1,55 @@
+{
+  "genuinePublicReadOnly": true,
+  "notProductionDeploymentVerification": true,
+  "runs": [
+    {
+      "base": "http://127.0.0.1:3000",
+      "readOnly": true,
+      "clockOffsetMs": 120000,
+      "markets": 13,
+      "firstReadyMs": 16186.795661,
+      "totalReadyMs": 127699.481748,
+      "historyResponses": 93,
+      "rawTickResponses": 1408,
+      "brokerErrors": [],
+      "checks": 15
+    },
+    {
+      "base": "http://127.0.0.1:3000",
+      "readOnly": true,
+      "clockOffsetMs": -120000,
+      "markets": 1,
+      "firstReadyMs": 15865.520304999998,
+      "totalReadyMs": 16108.858261999998,
+      "historyResponses": 13,
+      "rawTickResponses": 25,
+      "brokerErrors": [],
+      "checks": 15
+    },
+    {
+      "base": "http://127.0.0.1:3000",
+      "readOnly": true,
+      "clockOffsetMs": 0,
+      "markets": 1,
+      "firstReadyMs": 15823.868680999998,
+      "totalReadyMs": 16054.084352,
+      "historyResponses": 13,
+      "rawTickResponses": 26,
+      "brokerErrors": [],
+      "checks": 14
+    },
+    {
+      "base": "http://127.0.0.1:3000",
+      "readOnly": true,
+      "clockOffsetMs": 120000,
+      "correctedDuringScan": true,
+      "markets": 1,
+      "firstReadyMs": 15825.112138999999,
+      "totalReadyMs": 16107.091048,
+      "historyResponses": 13,
+      "rawTickResponses": 25,
+      "brokerErrors": [],
+      "checks": 14
+    }
+  ]
+}

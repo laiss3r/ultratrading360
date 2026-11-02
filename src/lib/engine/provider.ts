@@ -83,8 +83,10 @@ export interface MarketProvider {
   connect(): Promise<void>;
   disconnect(): void;
   isConnected(): boolean;
+  /** Broker clock in milliseconds; public read only, independent of the device wall clock. */
+  serverTime?():Promise<number>;
   /** Prime the provider with `count` historical quotes. */
-  history(symbol: string, count: number, signal?: AbortSignal, onProgress?: (loaded:number,total:number)=>void): Promise<Quote[]>;
+  history(symbol: string, count: number, signal?: AbortSignal, onProgress?: (loaded:number,total:number,status?:string)=>void): Promise<Quote[]>;
   /** Subscribe to live quotes. Returns a disposer. */
   stream(symbol: string, onQuote: (q: Quote) => void): Promise<() => void>;
   /** Price a contract from a real Deriv proposal. */
@@ -169,7 +171,13 @@ export class DerivProvider implements MarketProvider {
     return this.marketSvc.activeSymbols(productType);
   }
 
-  async history(symbol: string, count: number, signal?: AbortSignal, onProgress?: (loaded:number,total:number)=>void): Promise<Quote[]> {
+  async serverTime():Promise<number>{
+    const response=await this.client.send<{time:number}>({time:1});
+    if(typeof response.time!=='number'||!Number.isFinite(response.time)||response.time<=0)throw new Error('Broker clock response is invalid.');
+    return response.time*1000;
+  }
+
+  async history(symbol: string, count: number, signal?: AbortSignal, onProgress?: (loaded:number,total:number,status?:string)=>void): Promise<Quote[]> {
     if (!this.isConnected()) throw new Error('Deriv socket is not connected.');
     const { ticks, pipSize } = await this.marketSvc.ticksHistory(symbol, count, signal, onProgress);
     this.pipSizes.set(symbol, pipSize);

@@ -70,3 +70,8 @@ describe('measured execution timing',()=>{
   expect(result.timing).toEqual(expected);expect(updates.find(u=>u.phase==='open')?.timing).toEqual(expected);expect(result.timing!.quoteToReceiptMs).toBeLessThan(clock);
  });
 });
+
+describe('public broker clock',()=>{
+ it('uses the genuine server time response in milliseconds',async()=>{const send=vi.spyOn(DerivClient.prototype,'send').mockResolvedValue({time:1793637000} as never);expect(await new DerivProvider('deriv_demo').serverTime()).toBe(1793637000000);expect(send).toHaveBeenCalledWith({time:1});});
+ it.each([undefined,'1793637000',NaN,0,-1])('rejects invalid server time %s',async(time)=>{vi.spyOn(DerivClient.prototype,'send').mockResolvedValue({time} as never);await expect(new DerivProvider('deriv_demo').serverTime()).rejects.toThrow('invalid');});
+});
