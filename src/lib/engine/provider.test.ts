@@ -37,3 +37,18 @@ describe('authenticated balance verification',()=>{
   let frame!:(m:never)=>void;vi.spyOn(DerivClient.prototype,'subscribe').mockImplementation(async(_r,cb)=>{frame=cb;return {balance:{balance:'1.00',currency:'USD'}} as never;});const close=vi.spyOn(DerivClient.prototype,'close').mockImplementation(()=>{});const cb=vi.fn();await new DerivProvider('deriv_demo').streamBalance(cb);frame({balance:{balance:'bad',currency:'USD'}} as never);expect(close).toHaveBeenCalledOnce();expect(cb).toHaveBeenCalledTimes(1);
  });
 });
+
+describe('single-use fresh broker pricing',()=>{
+ it.each([0,1500])('reuses a fresh quote but reprices an aged quote (%sms)',async(age)=>{
+  const {ContractService}=await import('../deriv/contracts');const {TradingService}=await import('../deriv/trading');
+  const p=new DerivProvider('deriv_demo');vi.spyOn(p,'isConnected').mockReturnValue(true);
+  const proposal={id:'actual-quote',ask_price:1,payout:1.95,spot:100,spot_value:'100.00',date_start:1,date_expiry:2,longcode:'Broker proposal'};
+  const price=vi.spyOn(ContractService.prototype,'proposal').mockResolvedValue({proposal,impliedProbability:1/1.95});
+  vi.spyOn(DerivClient.prototype,'send').mockResolvedValue({buy:{buy_price:1,contract_id:42,payout:1.95,longcode:'Broker contract',purchase_time:1,start_time:1}} as never);
+  vi.spyOn(TradingService.prototype,'watchContract').mockResolvedValue({contract_id:42,profit:.95,buy_price:1,is_sold:1,status:'won'} as never);
+  const now=Date.now();vi.spyOn(Date,'now').mockReturnValue(now);
+  const priced=await p.price({symbol:'R_10',contractType:'DIGITEVEN',stake:1,duration:1,durationUnit:'t',currency:'USD'});
+  vi.mocked(Date.now).mockReturnValue(now+age);const permission=vi.fn(()=>true);
+  await p.execute(priced,{authorized:true,shouldExecute:permission});expect(price).toHaveBeenCalledTimes(age===0?1:2);expect(permission).toHaveBeenCalled();await expect(p.execute(priced,{authorized:true})).rejects.toThrow(/consumed/);
+ });
+});

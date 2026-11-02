@@ -1,4 +1,4 @@
-import type { AccountMode, Tick, OpenContract } from '../deriv/types';
+import type { AccountMode, Tick, OpenContract, Proposal } from '../deriv/types';
 import { DerivClient } from '../deriv/client';
 import { MarketDataService } from '../deriv/market';
 import { ContractService, type ContractType } from '../deriv/contracts';
@@ -101,7 +101,7 @@ export class DerivProvider implements MarketProvider {
   private contractSvc: ContractService;
   private tradingSvc: TradingService;
   private pipSizes = new Map<string, number>();
-  private pricedRequests = new WeakMap<PricedContract, PriceRequest>();
+  private pricedRequests = new WeakMap<PricedContract, {request:PriceRequest;proposal:Proposal;at:number}>();
 
   constructor(
     public readonly mode: 'deriv_demo' | 'deriv_real',
@@ -222,7 +222,7 @@ export class DerivProvider implements MarketProvider {
       barrier: req.barrier,
       source: 'deriv_live',
     };
-    this.pricedRequests.set(priced, Object.freeze({ ...req }));
+    this.pricedRequests.set(priced, {request:Object.freeze({...req}),proposal:Object.freeze({...proposal}),at:Date.now()});
     return priced;
   }
 
@@ -236,15 +236,16 @@ export class DerivProvider implements MarketProvider {
     if (!this.isConnected()) {
       throw new Error('Deriv socket dropped — refusing to report a trade that was not placed.');
     }
-    const context = this.pricedRequests.get(priced);
-    if (!context) throw new Error('Missing or already consumed pricing context; refusing an unverified purchase.');
+    const quote = this.pricedRequests.get(priced);
+    if (!quote) throw new Error('Missing or already consumed pricing context; refusing an unverified purchase.');
     this.pricedRequests.delete(priced);
+    const context=quote.request;
     const req: BuyRequest = {
       underlying: context.symbol, contractType: context.contractType,
       stake: priced.stake, currency: context.currency,
       duration: context.duration, durationUnit: context.durationUnit, barrier: context.barrier,
     };
-    const trade = await this.tradingSvc.buy(req, { authorized: opts.authorized, maxAcceptablePrice: priced.askPrice, shouldExecute: (proposal) => opts.shouldExecute?.({askPrice:proposal.ask_price,payout:proposal.payout}) ?? true, onBuying: () => opts.onUpdate?.({phase:'buying'}) });
+    const trade = await this.tradingSvc.buy(req, { verifiedProposal:Date.now()>=quote.at&&Date.now()-quote.at<=1000?quote.proposal:undefined, authorized: opts.authorized, maxAcceptablePrice: priced.askPrice, shouldExecute: (proposal) => opts.shouldExecute?.({askPrice:proposal.ask_price,payout:proposal.payout}) ?? true, onBuying: () => opts.onUpdate?.({phase:'buying'}) });
     opts.onUpdate?.({phase:'open',contractId:trade.contractId,stake:trade.buyPrice,potentialPayout:trade.payout,longcode:trade.longcode,pipSize:this.pipFor(priced.symbol),dateStart:trade.dateStart*1000,dateExpiry:trade.dateExpiry*1000,buyTransactionId:trade.transactionId});
     const settled = await this.tradingSvc.watchContract(trade.contractId,(c)=>opts.onUpdate?.({phase:'open',contractId:trade.contractId,entryPrice:c.entry_tick,exitPrice:c.exit_tick,currentSpot:c.current_spot,contractValue:c.bid_price,profit:c.profit,canSell:c.is_valid_to_sell===0?false:c.is_valid_to_sell===1?true:undefined,recordedTicks:Array.isArray(c.tick_stream)?c.tick_stream.length:undefined,totalTicks:c.tick_count,buyTransactionId:c.transaction_ids?.buy===undefined?undefined:String(c.transaction_ids.buy),sellTransactionId:c.transaction_ids?.sell===undefined?undefined:String(c.transaction_ids.sell),brokerStatus:c.status}));
     if(!Number.isFinite(settled.profit))throw new Error('Broker settlement has no finite profit; reconcile this contract before restarting.');

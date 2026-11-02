@@ -45,15 +45,16 @@ export class TradingService {
 
   async buy(
     req: BuyRequest,
-    opts: { authorized: boolean; maxAcceptablePrice?: number; minAcceptablePayout?: number; shouldExecute?: (proposal:Proposal) => boolean; onBuying?: () => void },
+    opts: { authorized: boolean; verifiedProposal?:Proposal; maxAcceptablePrice?: number; minAcceptablePayout?: number; shouldExecute?: (proposal:Proposal) => boolean; onBuying?: () => void },
   ): Promise<ExecutedTrade> {
     if (!opts.authorized) {
       throw new Error('REFUSED: buy() requires an explicit authorization from the risk manager.');
     }
     if (!(req.stake > 0)) throw new Error(`Invalid stake: ${req.stake}`);
 
-    // 1. Price it live.
-    const { proposal } = await this.contracts.proposal({
+    // The provider may forward its own immutable, single-use broker quote (<=1 second old).
+    // Otherwise request a fresh quote; payout/price/permission checks below always run.
+    const { proposal } = opts.verifiedProposal?{proposal:opts.verifiedProposal}:await this.contracts.proposal({
       underlying: req.underlying,
       contractType: req.contractType,
       amount: req.stake,

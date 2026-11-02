@@ -1,13 +1,8 @@
 'use client';
 
-import Link from 'next/link';
-import { useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useRef, useState } from 'react';
 import { Download, Play } from 'lucide-react';
-import {conditionDescription} from '@/lib/elite/config';
 import { useApp } from '@/state/store';
-import { effectiveStrategyLimits } from '@/lib/engine/strategies';
-import {ContractService} from '@/lib/deriv/contracts';
 import type { Quote } from '@/lib/engine/provider';
 import { BrokerTransactions } from './ExecutionConsole';
 import { Button, Empty, Notice, Panel, Toggle } from './ui';
@@ -57,34 +52,28 @@ export function DigitDistribution() {
   return <div><div className="digit-bars" aria-label="Observed last-digit frequency">{counts.map((count,d) => <div className="digit-column" key={d}><span>{sample.length ? `${(count/sample.length*100).toFixed(1)}%` : '—'}</span><div className="digit-track"><i style={{height:`${count/max*100}%`}} /></div><b>{d}</b></div>)}</div><p className="micro muted">{sample.length} observed digits · Past frequencies do not predict the next tick.</p></div>;
 }
 
-export function RunButton({ strategyId, prepare, disabled=false, beforeRun, children = 'Run strategy' }: { strategyId?: string; prepare?: () => Promise<string>; disabled?:boolean; beforeRun?:()=>void; children?: string }) {
-  const hydrated=useApp(s=>s.hydrated);
-  const [preparedId, setPreparedId] = useState<string | null>(null);
-  const currentId = preparedId ?? strategyId;
-  const [confirm, setConfirm] = useState(false);
-  const [message, setMessage] = useState('');
-  const [pending, setPending] = useState(false);
-  const [confirmedAccount,setConfirmedAccount] = useState('');
-  const [acknowledgeReal,setAcknowledgeReal] = useState(false);
-  const acknowledged = useApp((s)=>s.settings.realTradingAcknowledged && s.settings.acknowledgedAccountLoginid===s.session?.loginid);
-  const session = useApp((s)=>s.session);
-  const strategy = useApp((s)=>s.strategies.find((x)=>x.id===currentId));
-  const globalLimits = useApp((s)=>s.settings.limits);
-  const limits = strategy ? effectiveStrategyLimits(globalLimits, strategy) : null;
-  const visibleMessage = globalLimits.tradingEnabled && message.startsWith('Trading is disabled') ? '' : message;
-  const open = async () => {
-    if(disabled||hydrated===false)return;
-    setConfirmedAccount(useApp.getState().session?.loginid ?? '');setAcknowledgeReal(false);
-    setMessage('');
-    try { if (prepare) { setPending(true); setPreparedId(await prepare()); } setConfirm(true); }
-    catch (e) { setMessage((e as Error).message); } finally { setPending(false); }
-  };
-  const run = async () => {
-    setPending(true); setMessage('');
-    try { beforeRun?.();const permission = await useApp.getState().authorizeConfirmedRun(confirmedAccount,acknowledgeReal);if(!permission.ok){setMessage(permission.message);return;}const task = useApp.getState().runStrategy(currentId ?? '');if(useApp.getState().botState==='starting')setConfirm(false);const result=await task; if(result.ok) setConfirm(false); else setMessage(result.message); }
-    catch(e) { setMessage((e as Error).message); } finally { setPending(false); }
-  };
-  return <><Button busy={pending} disabled={disabled||hydrated===false} onClick={()=>void open()}><Play size={14}/>{children}</Button>{visibleMessage&&!confirm&&<Notice tone="error">{visibleMessage}</Notice>}{confirm && createPortal(<div className="modal-backdrop" onClick={()=>!pending&&setConfirm(false)}><div role="dialog" aria-modal="true" aria-labelledby={`confirm-${currentId}`} className="confirm-dialog" onClick={(e)=>e.stopPropagation()}><span className="eyebrow">CONFIRM BEFORE TRADING</span><h2 id={`confirm-${currentId}`}>{strategy?.name ?? 'Run strategy'}</h2><p>This starts genuine Deriv orders on <strong>{session?.loginid ? `${session.loginid} (${session.isVirtual?'Demo':'REAL MONEY'})` : 'no connected account'}</strong>. Open contracts may still settle after stopping.</p><dl className="detail-list"><div><dt>Market</dt><dd>{strategy?.elite?strategy.elite.markets.join(', '):strategy?.market??'—'}</dd></div><div><dt>Base stake</dt><dd>{strategy?money(strategy.stake,strategy.currency):'—'}</dd></div><div><dt>Contract</dt><dd>{strategy?.contractType}{strategy?.barrier!==undefined?` · ${strategy.barrier}`:''}</dd></div><div><dt>Duration</dt><dd>{strategy?.duration} {strategy?.durationUnit==='t'?'ticks':strategy?.durationUnit}</dd></div><div><dt>Maximum entries</dt><dd>{limits?.maxTrades}</dd></div><div><dt>Profit target / stop loss</dt><dd>{limits?.maxSessionProfit || 'Off'} / {limits?.maxSessionLoss}</dd></div><div><dt>Stake plan / maximum stake</dt><dd>{strategy?.progression?.kind ?? 'Fixed'} / {limits?.maxStake}</dd></div>{strategy?.contractRotation&&<div><dt>Recovery contract</dt><dd>{strategy.contractRotation.recovery.contractType} · {strategy.contractRotation.mode}</dd></div>}</dl>{strategy?.elite&&<Notice><strong>Concurrent Elite session:</strong> {strategy.elite.rules.length} strategies across {strategy.elite.markets.length} markets. At most {strategy.elite.maxConcurrent} reserved/open contracts and {Math.min(strategy.elite.maxOpenExposure,globalLimits.maxOpenExposure)} {strategy.currency} open exposure, subject to stricter global caps. Mode: {strategy.elite.tradingMode==='continuous'?'repeat after a non-win, without requiring a fresh rule match':'analyse before every entry'}. {strategy.elite.martingale?'Martingale is enabled; losses may escalate stake.':'Flat stake; martingale is off.'}<details><summary>Review all Elite strategies</summary>{strategy.elite.rules.map((rule,i)=><p key={rule.id}>Strategy {i+1}: {rule.conditions.map(conditionDescription).join(', then ')} → {rule.contractType}{ContractService.requiresBarrier(rule.contractType)?` ${rule.barrier}`:''}, {rule.duration} ticks.</p>)}</details></Notice>}{(strategy?.signalGate||strategy?.name.startsWith('Overlord ·'))&&<Notice>Signal-gated on both Demo and Real: waits for held-out and new live evidence, then checks the actual payout. No signal means no buy.</Notice>}<Notice>{globalLimits.tradingEnabled ? 'Trading permission is ON.' : 'Confirm & run will enable trading for this browser.'} The bot starts only after Deriv verifies the selected account, and waits for qualified live conditions.</Notice>{session?.loginid&&!session.isVirtual&&!acknowledged&&<Toggle label="I acknowledge real-money risk for this selected account" checked={acknowledgeReal} onChange={setAcknowledgeReal}/>}<p className="micro muted">{session?.isVirtual?'Demo uses virtual funds; Real-money acknowledgement is not required.':'Real acknowledgement applies only to the confirmed account.'}</p>{visibleMessage&&<Notice tone="error">{visibleMessage}</Notice>}<div className="button-row"><Button busy={pending} onClick={()=>void run()}>Confirm & run</Button><Button variant="secondary" disabled={pending} onClick={()=>setConfirm(false)}>Cancel</Button></div><Link className="text-link" href="/risk" onClick={()=>setConfirm(false)}>Review trading permissions →</Link></div></div>, document.body)}</>;
+/** The Run click is the explicit execution instruction; never a modal or an automatic login effect. */
+export function RunButton({strategyId,prepare,disabled=false,beforeRun,children='Run strategy'}:{strategyId?:string;prepare?:()=>Promise<string>;disabled?:boolean;beforeRun?:()=>void;children?:string}){
+ const hydrated=useApp(s=>s.hydrated),session=useApp(s=>s.session);
+ const acknowledged=useApp(s=>s.settings.realTradingAcknowledged&&s.settings.acknowledgedAccountLoginid===s.session?.loginid);
+ const [consent,setConsent]=useState({account:'',checked:false}),[pending,setPending]=useState(false),[message,setMessage]=useState('');
+ const inFlight=useRef(false),needsConsent=!!session?.loginid&&!session.isVirtual&&!acknowledged;
+ const checked=consent.account===session?.loginid&&consent.checked;
+ const run=async()=>{
+  if(disabled||hydrated===false||inFlight.current)return;
+  inFlight.current=true;setPending(true);setMessage('');
+  const account=useApp.getState().session?.loginid??'';
+  try{
+   if(needsConsent&&!checked){setMessage('Acknowledge real-money risk for this account before Run.');return;}
+   const id=prepare?await prepare():strategyId;
+   beforeRun?.();
+   const permission=await useApp.getState().authorizeConfirmedRun(account,checked);
+   if(!permission.ok){setMessage(permission.message);return;}
+   beforeRun?.();
+   const result=await useApp.getState().runStrategy(id??'');if(!result.ok)setMessage(result.message);
+  }catch(error){setMessage((error as Error).message);}finally{inFlight.current=false;setPending(false);}
+ };
+ return <>{needsConsent&&<div className="inline-real-permission"><Toggle label="I acknowledge real-money risk for this selected account" checked={checked} onChange={value=>setConsent({account:session?.loginid??'',checked:value})}/><small>{session?.loginid} · permission applies only to this account</small></div>}<Button busy={pending} disabled={disabled||hydrated===false} onClick={()=>void run()}><Play size={14}/>{children}</Button>{message&&<Notice tone="error">{message}</Notice>}</>;
 }
 
 export function TradeTable({ limit = 100 }: { limit?: number }) {

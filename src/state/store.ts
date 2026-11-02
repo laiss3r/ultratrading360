@@ -843,11 +843,11 @@ export const useApp = create<State & Actions>()((set, get) => ({
 
   /* ---------------------------------------------------------- bot control */
 
-  /** Called ONLY by the explicit account/stake confirmation, never by login or a timer. */
+  /** Called ONLY by an explicit Run click, never by login or a timer. */
   async authorizeConfirmedRun(loginid: string, acknowledgeReal: boolean) {
     const session = get().session;
     const revision = identityRevision();
-    if (!loginid || session?.loginid !== loginid) return {ok:false,message:'The selected account changed. Review the account and confirm again.'};
+    if (!loginid || session?.loginid !== loginid) return {ok:false,message:'The selected account changed. Review the account and press Run again.'};
     if (get().bot?.hasPendingOrder() || ['starting','running','paused','stopping'].includes(get().botState)) return {ok:false,message:'Stop the active bot and wait for settlement before starting another.'};
     const real = !session.isVirtual;
     const alreadyAcknowledged = get().settings.realTradingAcknowledged && get().settings.acknowledgedAccountLoginid === loginid;

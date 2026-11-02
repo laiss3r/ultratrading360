@@ -51,12 +51,9 @@ async function configureBot() {
   await waitVerified();
 }
 async function confirmRun() {
+  const inline=main.getByRole('button',{name:'Run bot',exact:true}).locator('..').getByRole('switch',{name:'I acknowledge real-money risk for this selected account'});if(await inline.count()&&!await inline.isChecked())await inline.click();
   await main.getByRole('button', { name: 'Run bot', exact: true }).click();
-  const dialog = page.getByRole('dialog');
-  await dialog.waitFor();
-  check((await dialog.innerText()).includes(loginid), 'confirmation identifies selected genuine account');
-  await dialog.getByRole('button', { name: /Confirm/ }).click();
-  await dialog.waitFor({ state: 'hidden' });
+  await consolePanel().waitFor();check(await page.getByRole('dialog').count()===0,'single Run starts selected account without a popup');
 }
 async function waitOpen() {
   await page.waitForFunction(() => document.querySelector('.global-session')?.textContent?.includes('Broker confirmed contract'), { timeout: 60000 });
@@ -100,26 +97,26 @@ try {
   await consolePanel().getByRole('tab', { name: 'Transactions', exact: true }).click();
   const transactionText = await consolePanel().innerText();
   check(transactionText.includes('100.01') && transactionText.includes('100.08'), 'transactions expose broker entry and exit spots');
-  const csvDownload=page.waitForEvent('download');await consolePanel().getByRole('button',{name:'Download transactions'}).click();const csvFile=await csvDownload;const csv=await fs.readFile(await csvFile.path(),'utf8');check(csv.includes('net_profit')&&csv.includes(loginid)&&csv.split('\n').length===4,'transaction download includes exactly the selected run and account');
+  const csvDownload=page.waitForEvent('download');await consolePanel().getByRole('button',{name:'Download',exact:true}).click();const csvFile=await csvDownload;const csv=await fs.readFile(await csvFile.path(),'utf8');check(csv.includes('net_profit')&&csv.includes(loginid)&&csv.split('\n').length===4,'transaction download includes exactly the selected run and account');
   await page.screenshot({path:`/home/user/execution-${mode}-transactions.png`,fullPage:true});
-  await consolePanel().getByRole('tab', { name: 'Journal', exact: true }).click();
+  await consolePanel().getByRole('tab', { name: 'Journal', exact: true }).click();await consolePanel().getByLabel('Journal filter').selectOption('all');
   const journal = await consolePanel().innerText();
   check(['pricing', 'buying', 'open', 'settled'].every((phase) => (journal.toLowerCase().includes(phase)||phase==='settled'&&journal.includes('Profit amount'))), 'journal retains chronological broker lifecycle');
   const downloadPromise = page.waitForEvent('download');
-  await consolePanel().getByRole('button', { name: 'Download journal' }).click();
+  await consolePanel().getByRole('button', { name: 'Download', exact: true }).click();
   const download = await downloadPromise;
   const exported = JSON.parse(await fs.readFile(await download.path(), 'utf8'));
   check(exported.length > 10 && exported.every((entry) => entry.accountLoginid === loginid), 'journal download is scoped to selected account');
   await consolePanel().getByRole('button', { name: 'Reset session view' }).click();
   await consolePanel().getByRole('tab', { name: 'Summary', exact: true }).click();
-  check((await consolePanel().getByText('Purchased runs',{exact:true}).locator('..').innerText()).includes('0'), 'reset clears displayed run totals without inventing a session');
+  check((await consolePanel().getByText('No. of runs',{exact:true}).locator('..').innerText()).includes('0'), 'reset clears displayed run totals without inventing a session');
   if(await consolePanel().count())await page.getByRole('button',{name:'Collapse trading session'}).click();
   await navigate('/history');
   check(await main.locator('tbody tr').count() === 3, 'view reset preserves broker transaction history');
   await navigate('/overlord');
   await page.reload(); await accountButton().waitFor();
   await page.getByRole('button',{name:/Expand trading session/}).click();
-  await consolePanel().getByRole('tab', { name: 'Journal', exact: true }).click();
+  await consolePanel().getByRole('tab', { name: 'Journal', exact: true }).click();await consolePanel().getByLabel('Journal filter').selectOption('all');
   await consolePanel().getByRole('checkbox', { name: 'Include prior sessions for this account' }).check();
   check((await consolePanel().innerText()).toLowerCase().includes('settled'), 'account journal survives authenticated refresh and view reset');
   check((await ledger()).length === 3, 'refresh does not resume or duplicate execution');
@@ -155,10 +152,10 @@ try {
   await page.waitForFunction(()=>document.querySelector('.global-session')?.textContent?.includes('Session loss limit hit'),undefined,{timeout:60000});
   await page.waitForTimeout(800);check((await ledger()).length===1,'stop-loss trigger stops after exactly one losing settlement at the configured limit');
   await page.getByRole('button',{name:'Collapse trading session'}).click();
-  await navigate('/builder');await main.getByRole('button',{name:'New strategy'}).click();await main.getByRole('spinbutton',{name:'Maximum entries'}).fill('1');await main.getByRole('button',{name:'Save strategy',exact:true}).click();await main.getByRole('button',{name:'Run strategy',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:'Confirm & run'}).click();await consolePanel().waitFor();check(true,'Builder Run immediately expands the shared session');
+  await navigate('/builder');await main.getByRole('button',{name:'New strategy'}).click();await main.getByRole('spinbutton',{name:'Maximum entries'}).fill('1');await main.getByRole('button',{name:'Save strategy',exact:true}).click();await main.getByRole('button',{name:'Run strategy',exact:true}).click();await consolePanel().waitFor();check(true,'Builder Run immediately expands the shared session');
   await page.waitForFunction(()=>document.querySelector('.global-session .execution-dock')?.textContent?.includes('Run bot'),undefined,{timeout:20000});
   await page.getByRole('button',{name:'Collapse trading session'}).click();await navigate('/overlord');await main.locator('.saved-bot-list').count();
-  const saved=main.getByRole('heading',{name:'Your saved bots'}).locator('xpath=ancestor::section[1]');await saved.getByRole('button',{name:'Run strategy',exact:true}).last().click();await page.getByRole('dialog').getByRole('button',{name:'Confirm & run'}).click();await consolePanel().waitFor();check(true,'Saved bot Run expands the correct shared workspace');
+  const saved=main.getByRole('heading',{name:'Your saved bots'}).locator('xpath=ancestor::section[1]');await saved.getByRole('button',{name:'Run strategy',exact:true}).last().click();await consolePanel().waitFor();check(true,'Saved bot Run expands the correct shared workspace');
   await page.getByRole('button',{name:'Collapse trading session'}).click();await page.getByRole('button',{name:/Expand trading session/}).click();check(await consolePanel().isVisible(),'collapse and reopen preserve the active session');
   for(const [width,height] of [[320,568],[360,844],[390,844],[768,844],[1280,844]]){
    await page.setViewportSize({width,height});

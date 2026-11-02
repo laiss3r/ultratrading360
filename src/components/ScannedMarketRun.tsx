@@ -23,7 +23,7 @@ export function ScannedMarketRun({row,config,markets,disabled,expired,onPrepared
  const beforeRun=()=>{
   checkIdle();if(!prepared.current)throw new Error('Prepare this market again.');
   scannedRunConfig(prepared.current,config);
-  if(useApp.getState().activeSymbol!==prepared.current.symbol)throw new Error('Market selection changed. Close this confirmation and Run the intended market again.');
+  if(useApp.getState().activeSymbol!==prepared.current.symbol)throw new Error('Market selection changed. Run the intended market again.');
  };
  const best=row.analysis?.best;
  return <div className="scanned-market-run" data-run-contract={best?.contractType} data-run-barrier={best?.barrier} data-run-duration={row.analysis?.duration}><RunButton prepare={prepare} beforeRun={beforeRun} disabled={disabled||expired||row.phase!=='ready'}>Run market</RunButton>{best&&<small>{CONTRACT_LABELS[best.contractType]}{best.barrier===undefined?'':` ${best.barrier}`} · {row.analysis?.duration} tick{row.analysis?.duration===1?'':'s'}</small>}</div>;
