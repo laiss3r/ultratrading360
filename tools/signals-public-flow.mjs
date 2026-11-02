@@ -24,7 +24,7 @@ try{
  check(completedAtMs<62000,'scan returns retained results within the one-minute budget (foreground browser)');
  check(await page.locator('.scan-market-card').count()===expected,`${expected} market results are retained, including incomplete markets`);
  const cards=await page.locator('.scan-market-card').allTextContents(),activity=await page.locator('.scan-activity').innerText();
- check(cards.every(t=>!t.includes('0 live ticks observed')),'every watched market receives accepted live ticks');
+ check(cards.every(t=>!/(?:^|\D)0 live ticks observed/.test(t)),'every watched market receives accepted live ticks');
  check(cards.every(t=>!t.includes('stale or future-dated')),'genuine fresh seeds are not rejected by the device clock');
  check(activity.includes('history ticks loaded')&&activity.includes('receiving live ticks'),'header separates genuine page progress, completed markets and live feeds');
  if(offset&&!correctClock)check((await page.locator('.workspace-main').innerText()).includes('Your device clock differs from broker time'),'clock skew is explicitly explained rather than silently rejecting every tick');
