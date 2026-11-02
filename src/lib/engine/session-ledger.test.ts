@@ -1,0 +1,12 @@
+import {expect,it} from 'vitest';
+import type {TradeRecord} from './bot';
+import type {ExecutionEvent} from './execution';
+import {uniqueSessionTrades,sessionJournal} from './session-ledger';
+const trade=(id:number,stake:number,profit:number):TradeRecord=>({id:`t${id}`,runId:'run',accountLoginid:'DOT1',mode:'deriv_demo',source:'deriv_live',contractId:id,strategyId:'s',strategyName:'Elite',strategyVersion:1,idempotencyKey:`i${id}`,currency:'USD',symbol:'1HZ30V',contractType:'DIGITEVEN',duration:1,durationUnit:'t',stake,profit,payout:Math.round((stake+profit)*100)/100,won:profit>0,openedAt:id*100,closedAt:id*100+50,riskReasons:[],gateReasons:[]});
+const trades=[trade(1,1,-1),trade(2,1,.85),trade(3,1,.85),trade(4,2.1,1.77)];
+it('shows all four actual results from the screenshot even if lifecycle history has only three',()=>{const {results}=sessionJournal(trades,[]);expect(results).toHaveLength(4);expect(results.reduce((s,e)=>s+e.profit!,0)).toBeCloseTo(2.47);expect(results[0]).toMatchObject({contractId:4,profit:1.77,at:450});});
+it('deduplicates a contract appearing in both a receipt checkpoint and IndexedDB',()=>{expect(uniqueSessionTrades([...trades,{...trades[3],id:'reconciled'}])).toHaveLength(4);});
+it('uses actual terminal records rather than stale or duplicated lifecycle profit',()=>{const e={...sessionJournal([trades[3]],[]).results[0],id:'old',profit:999} as ExecutionEvent;const journal=sessionJournal(trades,[e,{...e,id:'duplicate'}]);expect(journal.events).toHaveLength(4);expect(journal.results[0].profit).toBe(1.77);});
+it('does not turn an unmatched lifecycle message into an extra financial result',()=>{const e={...sessionJournal([trades[0]],[]).results[0],contractId:999,profit:99};expect(sessionJournal(trades,[e]).results).toHaveLength(4);expect(sessionJournal(trades,[e]).events).toHaveLength(4);});
+it('does not merge the same contract number from different accounts or environments',()=>{expect(uniqueSessionTrades([trades[0],{...trades[0],accountLoginid:'OTHER'},{...trades[0],mode:'deriv_real'}])).toHaveLength(3);});
+it('prefers an actual terminal result over an error and excludes failed entries from result rows',()=>{expect(sessionJournal([{...trades[0],error:'Failed'},trades[0],{...trades[1],error:'Failed'}],[]).results).toHaveLength(1);});
