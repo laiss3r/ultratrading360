@@ -1,0 +1,15 @@
+{
+  "base": "http://127.0.0.1:3000",
+  "readOnly": true,
+  "clockOffsetMs": 120000,
+  "correctedDuringScan": false,
+  "markets": 13,
+  "analysed": 4,
+  "completedAtMs": 60148.953298,
+  "firstReadyMs": 16267.533008,
+  "totalReadyMs": 60829.192384,
+  "historyResponses": 44,
+  "rawTickResponses": 675,
+  "brokerErrors": [],
+  "checks": 16
+}

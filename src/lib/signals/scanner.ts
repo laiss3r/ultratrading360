@@ -5,7 +5,7 @@ import { PatternTracker, SIGNAL_POLICY, type SignalEvidence } from './patterns';
 export interface WatchedSignal {
   symbol:string; name:string; phase:'queued'|'connecting'|'loading'|'watching'|'retrying';
   evidence?:SignalEvidence; error?:string; historyLoaded:number; historyTarget:number;
-  liveTicks:number; digits:number[]; lastQuote?:Quote; retryAt?:number; asOf?:number; clockSkewMs?:number;
+  liveTicks:number; digits:number[]; lastQuote?:Quote; retryAt?:number; asOf?:number; clockSkewMs?:number; remainingMs?:number; complete?:boolean; result?:'qualified'|'no_setup'|'incomplete';
 }
 interface Runtime {
   row:WatchedSignal; tracker?:PatternTracker; buffer:Quote[]; dispose?:()=>void;
@@ -13,21 +13,23 @@ interface Runtime {
   opening:boolean; seeding:boolean; queued:boolean; attempts:number;
 }
 /** Read-only scanner. Streams open BEFORE paged history; Stop owns every late resource. */
-export function watchSignals(provider:MarketProvider,markets:ActiveSymbol[],leg:ContractLeg,duration:number,onUpdate:(rows:WatchedSignal[])=>void):()=>void {
+export function watchSignals(provider:MarketProvider,markets:ActiveSymbol[],leg:ContractLeg,duration:number,onUpdate:(rows:WatchedSignal[])=>void,options:{budgetMs?:number}={}):()=>void {
   const work=[...new Map(markets.map(m=>[m.underlying_symbol,m])).values()].slice(0,20);
   const states:Runtime[]=work.map(m=>({row:{symbol:m.underlying_symbol,name:m.underlying_symbol_name,phase:'queued',historyLoaded:0,historyTarget:SIGNAL_POLICY.historySize,liveTicks:0,digits:[]},buffer:[],opening:false,seeding:false,queued:false,attempts:0}));
-  let stopped=false,opening=0,seeding=0;
+  let stopped=false,finished=false,opening=0,seeding=0;
+  const budgetMs=Math.max(1,Math.min(60000,Number.isFinite(options.budgetMs)?options.budgetMs!:60000)),startedAt=performance.now();
   let clockAnchor:{epochMs:number;monotonicMs:number}|undefined;
   let calibrationTimer:ReturnType<typeof setTimeout>|undefined;
   const now=()=>clockAnchor?clockAnchor.epochMs+performance.now()-clockAnchor.monotonicMs:Date.now();
   const openQueue=[...states],seedQueue:Runtime[]=[];
   const emit=()=>{
     if(stopped)return;
+    if(!finished&&performance.now()-startedAt>=budgetMs){finish();return;}
     const observedAt=now(),connected=provider.isConnected();
     onUpdate(states.map(s=>{
       let evidence=s.tracker?.snapshot(observedAt);
       if(evidence&&!connected)evidence={...evidence,status:'stale',reason:'Market feed disconnected; waiting for fresh ticks and reseeding if needed.'};
-      return {...s.row,digits:[...s.row.digits],evidence,asOf:observedAt,clockSkewMs:clockAnchor?observedAt-Date.now():undefined};
+      return {...s.row,digits:[...s.row.digits],evidence,complete:finished,remainingMs:finished?0:Math.max(0,budgetMs-(performance.now()-startedAt)),result:finished?(evidence?.status==='qualified'?'qualified':evidence?.status==='waiting'?'no_setup':'incomplete'):undefined,asOf:observedAt,clockSkewMs:clockAnchor?observedAt-Date.now():undefined};
     }));
   };
   // UI batching is independent of tick ingestion. No random progress or confidence.
@@ -47,6 +49,7 @@ export function watchSignals(provider:MarketProvider,markets:ActiveSymbol[],leg:
   };
   const receive=(s:Runtime,q:Quote)=>{
     if(stopped)return;
+    if(performance.now()-startedAt>=budgetMs){finish();return;}
     const previous=s.row.lastQuote,receivedAt=now();
     if(q.symbol!==s.row.symbol||q.source!=='deriv_live'||!Number.isFinite(q.price)||!Number.isFinite(q.epoch)||q.epoch*1000>receivedAt+2000||receivedAt-q.epoch*1000>SIGNAL_POLICY.maxAgeMs||!Number.isInteger(q.digit)||q.digit<0||q.digit>9||!Number.isInteger(q.pipSize)||q.pipSize<0||q.pipSize>10)return;
     if(previous&&(q.epoch<previous.epoch||(q.epoch===previous.epoch&&q.price===previous.price)))return;
@@ -112,9 +115,12 @@ export function watchSignals(provider:MarketProvider,markets:ActiveSymbol[],leg:
       emit();calibrationTimer=setTimeout(()=>void start(),2000);
     }
   }
+  function finish(){if(stopped)return;finished=true;emit();stop();}
+  const budgetTimer=setTimeout(finish,Math.max(0,budgetMs-(performance.now()-startedAt)));
   emit();void start();
-  return ()=>{
-    stopped=true;clearInterval(clock);if(calibrationTimer)clearTimeout(calibrationTimer);openQueue.length=0;seedQueue.length=0;
+  function stop(){
+    if(stopped)return;stopped=true;clearTimeout(budgetTimer);clearInterval(clock);if(calibrationTimer)clearTimeout(calibrationTimer);openQueue.length=0;seedQueue.length=0;
     for(const s of states){if(s.timer)clearTimeout(s.timer);s.abort?.abort();s.dispose?.();s.tracker=undefined;s.buffer=[];}
-  };
+  }
+  return stop;
 }

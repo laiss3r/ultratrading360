@@ -57,3 +57,17 @@ it('reports failed clock verification, retries read-only, and cancels retry on S
  vi.useFakeTimers();const serverTime=vi.fn().mockRejectedValueOnce(Error('Clock unavailable')).mockResolvedValue(Date.now()),stream=vi.fn(async()=>()=>{});let rows:WatchedSignal[]=[];
  const stop=watchSignals({serverTime,stream,history:async(s:string)=>hist(s),isConnected:()=>true} as unknown as MarketProvider,[market(10)],{contractType:'DIGITEVEN'},1,r=>rows=r);await flush();expect(rows[0].phase).toBe('retrying');expect(rows[0].error).toContain('Clock verification failed');expect(stream).not.toHaveBeenCalled();stop();await vi.advanceTimersByTimeAsync(3000);expect(serverTime).toHaveBeenCalledOnce();expect(vi.getTimerCount()).toBe(0);
 });
+it('ends at 60 seconds, retains honest incomplete results, cancels late history and every scanner resource',async()=>{
+ vi.useFakeTimers();let rows:WatchedSignal[]=[];let finish!:(q:Quote[])=>void;let signal!:AbortSignal;const dispose=vi.fn();
+ const stop=watchSignals({isConnected:()=>true,stream:async()=>dispose,history:(_s:string,_n:number,a:AbortSignal)=>{signal=a;return new Promise<Quote[]>(r=>finish=r);}} as unknown as MarketProvider,[market(10)],{contractType:'DIGITEVEN'},1,r=>rows=r);
+ await flush();await vi.advanceTimersByTimeAsync(59999);expect(rows[0].complete).toBe(false);await vi.advanceTimersByTimeAsync(1);expect(rows[0].complete).toBe(true);expect(rows[0].result).toBe('incomplete');expect(rows[0].remainingMs).toBe(0);expect(signal.aborted).toBe(true);expect(dispose).toHaveBeenCalledOnce();const saved=rows;finish(hist('R_10'));await flush();expect(rows).toBe(saved);expect(vi.getTimerCount()).toBe(0);stop();expect(dispose).toHaveBeenCalledOnce();
+});
+it('includes clock verification in the one-minute budget and disposes no unowned stream',async()=>{
+ vi.useFakeTimers();let finish!:(n:number)=>void;let rows:WatchedSignal[]=[];const stream=vi.fn();watchSignals({serverTime:()=>new Promise<number>(r=>finish=r),stream,isConnected:()=>true} as unknown as MarketProvider,[market(10)],{contractType:'DIGITEVEN'},1,r=>rows=r);await vi.advanceTimersByTimeAsync(60000);expect(rows[0].complete).toBe(true);expect(rows[0].result).toBe('incomplete');finish(Date.now());await flush();expect(stream).not.toHaveBeenCalled();expect(vi.getTimerCount()).toBe(0);
+});
+it('returns no qualified setup when a complete forward sample fails the evidence bound',async()=>{
+ vi.useFakeTimers();let tick!:(q:Quote)=>void;let rows:WatchedSignal[]=[];
+ watchSignals({isConnected:()=>true,stream:async(_s:string,cb:typeof tick)=>{tick=cb;return ()=>{};},history:async(s:string)=>hist(s)} as unknown as MarketProvider,[market(10)],{contractType:'DIGITEVEN'},1,r=>rows=r);await flush();
+ for(let i=0;i<59;i++){await vi.advanceTimersByTimeAsync(1000);tick({...quote(),digit:1,price:100.01});}
+ await vi.advanceTimersByTimeAsync(1000);expect(rows[0].complete).toBe(true);expect(rows[0].result).toBe('no_setup');expect(rows[0].evidence?.forward.total).toBeGreaterThanOrEqual(30);expect(vi.getTimerCount()).toBe(0);
+});

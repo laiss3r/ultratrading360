@@ -19,19 +19,21 @@ try{
  if(correctClock)await page.evaluate(()=>{Date.now=()=>new Date().getTime();});
  await page.locator('.scan-market-card[data-scan-phase=watching]').first().waitFor({timeout:35000});const firstReadyMs=performance.now()-started;
  check(true,`first market completes a full historical seed (${Math.round(firstReadyMs)} ms)`);
- await page.waitForFunction(n=>document.querySelectorAll('.scan-market-card[data-scan-phase=watching]').length===n,expected,{timeout:300000});
- check(true,`${expected} / ${expected} markets complete historical analysis`);
+ await page.getByRole('button',{name:'Scan again',exact:true}).waitFor({timeout:65000});
+ const completedAtMs=performance.now()-started,analysed=await page.locator('.scan-market-card[data-scan-phase=watching]').count();
+ check(completedAtMs<62000,'scan returns retained results within the one-minute budget (foreground browser)');
+ check(await page.locator('.scan-market-card').count()===expected,`${expected} market results are retained, including incomplete markets`);
  const cards=await page.locator('.scan-market-card').allTextContents(),activity=await page.locator('.scan-activity').innerText();
  check(cards.every(t=>!t.includes('0 live ticks observed')),'every watched market receives accepted live ticks');
  check(cards.every(t=>!t.includes('stale or future-dated')),'genuine fresh seeds are not rejected by the device clock');
  check(activity.includes('history ticks loaded')&&activity.includes('receiving live ticks'),'header separates genuine page progress, completed markets and live feeds');
  if(offset&&!correctClock)check((await page.locator('.workspace-main').innerText()).includes('Your device clock differs from broker time'),'clock skew is explicitly explained rather than silently rejecting every tick');
  check(requests.filter(r=>r.time===1).length>=1,'freshness is calibrated against an actual broker clock response');
- check(pages>=expected*5&&ticks>expected,'actual paginated history and live responses were observed');
+ check(pages>=analysed*5&&ticks>expected,'actual paginated history and live responses were observed');
  for(const width of [320,390,1280]){await page.setViewportSize({width,height:900});check(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`${width}px scan does not overflow the viewport`);}
  await page.screenshot({path:`/home/user/signals-public-${offset}-${expected}.png`,fullPage:true});
- await page.getByRole('button',{name:'Stop scan',exact:true}).click();check(await page.getByText('Live scan is stopped',{exact:true}).isVisible(),'Stop clears scan evidence and owns pending resources');
+ await page.getByRole('button',{name:'Scan again',exact:true}).click();await page.getByRole('button',{name:'Stop scan',exact:true}).click();check(await page.getByText('Live scan is stopped',{exact:true}).isVisible(),'Stop clears scan evidence and owns pending resources');
  check(!requests.some(r=>r.buy||r.authorize||r.proposal||r.proposal_open_contract),'verification sends no private authentication, quote or order');
  check(errors.length===0,`no browser runtime errors (${errors.join('; ')})`);
- console.log(JSON.stringify({base,readOnly:true,clockOffsetMs:offset,correctedDuringScan:correctClock,markets:expected,firstReadyMs,totalReadyMs:performance.now()-started,historyResponses:pages,rawTickResponses:ticks,brokerErrors,checks}));
+ console.log(JSON.stringify({base,readOnly:true,clockOffsetMs:offset,correctedDuringScan:correctClock,markets:expected,analysed,completedAtMs,firstReadyMs,totalReadyMs:performance.now()-started,historyResponses:pages,rawTickResponses:ticks,brokerErrors,checks}));
 }catch(error){await page.screenshot({path:'/home/user/signals-public-failure.png',fullPage:true});console.error(await page.locator('.workspace-main').innerText());throw error;}finally{await browser.close();}
