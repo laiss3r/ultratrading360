@@ -9,7 +9,8 @@ import { accountDiscoveryMessage } from '@/lib/deriv/accountDiagnostics';
 import type { AccountMode, ActiveSymbol, AuthSession } from '@/lib/deriv/types';
 import { DERIV_APP_ID } from '@/lib/deriv/config';
 import { DerivProvider, type MarketProvider, type Quote } from '@/lib/engine/provider';
-import { RiskManager, type RiskSnapshot } from '@/lib/engine/risk';
+import {dailyRiskPnl,mergeDailyRisk,type DailyRiskBook} from '@/lib/engine/daily-risk';
+import { RiskManager,validateRiskLimits, type RiskSnapshot } from '@/lib/engine/risk';
 import {OrderCancelledError} from '@/lib/deriv/trading';
 import {checkpointEliteEvent,checkpointEliteTrade,clearEliteCheckpoint,loadEliteCheckpoint,mergeEliteTrades} from '@/lib/elite/checkpoint';
 import {EliteBot} from '@/lib/elite/engine';
@@ -20,7 +21,7 @@ import { computeMetrics, type PerformanceMetrics } from '@/lib/metrics';
 import {
   DEFAULT_SETTINGS,
   appendExecutionEvent, loadExecutionJournal, loadSessionResets, saveSessionResets,
-  appendTrades,
+  appendTrades,recordDailyTrades,
   listStrategies,
   listTrades,
   loadSettings,
@@ -97,6 +98,8 @@ interface State {
   metrics: PerformanceMetrics;
   risk: RiskManager;
   riskSnapshot: RiskSnapshot;
+  dailyRisk:DailyRiskBook;
+  riskLedgerError:string|null;
   log: LogEntry[];
   busy: string | null;
   balanceStatus: BalanceStatus;
@@ -191,6 +194,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
   execution: null, executionJournal: [], botSignal: null, sessionResets: {},
   trades: [],
   metrics: computeMetrics([], 0),
+  dailyRisk:{},riskLedgerError:null,
   risk: new RiskManager(DEFAULT_SETTINGS.limits, DEFAULT_SETTINGS.recovery, 0),
   riskSnapshot: new RiskManager().getSnapshot(),
   log: [],
@@ -214,7 +218,10 @@ export const useApp = create<State & Actions>()((set, get) => ({
     const storedSettings = await loadSettings();
     const strategies = await listStrategies();
     const checkpoint=loadEliteCheckpoint();
-    const trades = mergeEliteTrades(checkpoint.trades,await listTrades());
+    const storedTrades=await listTrades(Number.MAX_SAFE_INTEGER);
+    const trades = mergeEliteTrades(checkpoint.trades,storedTrades);
+    let dailyRisk=mergeDailyRisk({},[...storedTrades,...checkpoint.trades]),riskLedgerError:string|null=null;
+    try{dailyRisk=await recordDailyTrades([...storedTrades,...checkpoint.trades]);}catch{riskLedgerError='Daily risk ledger could not be restored. New runs are blocked until storage is repaired; do not clear browser data to bypass a loss limit.';}
     const journal=await loadExecutionJournal();
     const journalById=new Map<string,ExecutionEvent>();for(const e of [...checkpoint.events,...journal].sort((a,b)=>b.at-a.at)){if(!journalById.has(e.id))journalById.set(e.id,e);}
     const executionJournal=[...journalById.values()];
@@ -224,7 +231,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
     set({
       settings,
       strategies: strategies.length ? strategies : [createStrategy({ name: 'Starter — odd digit' })],
-      trades, executionJournal, sessionResets,
+      trades, executionJournal, sessionResets,dailyRisk,riskLedgerError,
       metrics: computeMetrics(trades, 0),
       risk,
       riskSnapshot: risk.getSnapshot(),
@@ -807,6 +814,8 @@ export const useApp = create<State & Actions>()((set, get) => ({
   /* ---------------------------------------------------------- strategies */
 
   async saveStrategy(s: Strategy): Promise<{ ok: boolean; message: string }> {
+    const riskErrors=validateRiskLimits(get().settings.limits);
+    if(riskErrors.length)return {ok:false,message:`Invalid risk settings: ${riskErrors.join(' ')}`};
     const v = validateStrategy(s);
     if (!v.valid) {
       get().pushLog('error', `Strategy "${s.name}" is invalid: ${v.errors[0]}`);
@@ -873,9 +882,13 @@ export const useApp = create<State & Actions>()((set, get) => ({
   },
 
   async runStrategy(id: string): Promise<{ ok: boolean; message: string }> {
+    if(get().riskLedgerError)return {ok:false,message:get().riskLedgerError!};
+    if(typeof window!=='undefined'&&typeof indexedDB==='undefined')return {ok:false,message:'Durable browser storage is required before execution.'};
     const s = get().strategies.find((x) => x.id === id);
     if (!s) return { ok: false, message: 'Strategy not found.' };
 
+    const riskErrors=validateRiskLimits(get().settings.limits);
+    if(riskErrors.length)return {ok:false,message:`Invalid risk settings: ${riskErrors.join(' ')}`};
     const v = validateStrategy(s);
     if (!v.valid) return { ok: false, message: v.errors.join(' · ') };
 
@@ -908,9 +921,13 @@ export const useApp = create<State & Actions>()((set, get) => ({
     }
 
     if(pendingEliteEvents(get().executionJournal,get().trades,get().session?.loginid,mode).length)return {ok:false,message:'An Elite broker outcome is still unresolved. Reconcile the session before starting any bot.'};
+    const dailyRisk=mergeDailyRisk(get().dailyRisk,get().trades);
+    const dailyPnl=dailyRiskPnl(dailyRisk,get().session?.loginid,mode,get().session?.currency);
+    if(dailyPnl<=-Math.abs(get().settings.limits.maxDailyLoss))return {ok:false,message:`Daily loss limit reached for this account (${dailyPnl.toFixed(2)} ${get().session!.currency}, UTC day). Session resets do not reset the daily guard.`};
     const startingBalance = get().session?.balance ?? 0;
     const risk = new RiskManager(effectiveStrategyLimits(get().settings.limits, s), s.progression ? { ...s.recovery, enabled: false } : s.recovery, startingBalance);
 
+    risk.restoreDailyPnl(dailyPnl);
     const accountAtRun=get().session!.loginid;
     const Bot=s.elite?EliteBot:TradingBot;
     const bot = new Bot(s, provider, risk, {
@@ -932,21 +949,21 @@ export const useApp = create<State & Actions>()((set, get) => ({
       },
       onTrade: (t) => {
         if(t.runId?.startsWith('elite_')){try{checkpointEliteTrade(t);}catch{get().pushLog('warn','Settled trade checkpoint failed; export history before closing this tab.');}}
-        void appendTrades([t]).catch(()=>get().pushLog('warn','Trade persistence failed; export the current broker result.'));
+        void appendTrades([t]).catch(()=>{const message='Trade/risk persistence failed. New runs are blocked; keep the current broker results and repair browser storage.';set({riskLedgerError:message});get().stopBot(message);get().pushLog('error',message);});
         const trades = [t, ...get().trades].slice(0, 5000);
-        set({ trades, metrics: computeMetrics(trades, startingBalance), riskSnapshot: risk.getSnapshot() });
+        set({ trades,dailyRisk:mergeDailyRisk(get().dailyRisk,[t]), metrics: computeMetrics(trades, startingBalance), riskSnapshot: risk.getSnapshot() });
         get().pushLog(
-          t.error ? 'error' : t.won ? 'ok' : 'warn',
+          t.error ? 'error' : t.profit>0 ? 'ok' : t.profit<0?'warn':'info',
           t.error
             ? `TRADE ERROR ${t.symbol}: ${t.error}`
-            : `${t.won ? 'WIN ' : 'LOSS'} ${t.symbol} ${t.contractType} stake ${t.stake.toFixed(2)} -> ${t.profit >= 0 ? '+' : ''}${t.profit.toFixed(2)} [${mode === 'deriv_real' ? 'REAL' : 'DEMO'}]`,
+            : `${t.profit>0 ? 'WIN ' : t.profit<0?'LOSS':'ZERO'} ${t.symbol} ${t.contractType} stake ${t.stake.toFixed(2)} -> ${t.profit >= 0 ? '+' : ''}${t.profit.toFixed(2)} [${mode === 'deriv_real' ? 'REAL' : 'DEMO'}]`,
         );
       },
       onError: (e) => get().pushLog('error', e.message),
       onRisk: (d) => {
         if (!d.allowed && d.reasons.length) get().pushLog('warn', `Risk manager refused a trade: ${d.reasons.join(' ')}`);
       },
-    }, startingBalance, {accountLoginid:get().session?.loginid,canExecute:()=>get().provider===provider&&get().session?.loginid===accountAtRun&&get().tradingLoginid===accountAtRun&&get().settings.limits.tradingEnabled&&(mode!=='deriv_real'||(get().settings.realTradingAcknowledged&&get().settings.acknowledgedAccountLoginid===accountAtRun))});
+    }, startingBalance, {accountLoginid:get().session?.loginid,canExecute:()=>!get().riskLedgerError&&get().provider===provider&&get().session?.loginid===accountAtRun&&get().tradingLoginid===accountAtRun&&get().settings.limits.tradingEnabled&&(mode!=='deriv_real'||(get().settings.realTradingAcknowledged&&get().settings.acknowledgedAccountLoginid===accountAtRun))});
 
     set({ bot, risk, riskSnapshot: risk.getSnapshot(), activeStrategyId: id, botState: 'starting', botDetail: '', botSignal:null, execution:null, runPanelOpen:true,runPanelTab:'summary' });
     try {
@@ -988,7 +1005,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
         if(get().session?.loginid!==account||get().provider!==provider)return {ok:false,message:'Account changed during reconciliation; no result applied.'};
         const result=terminalBrokerResult(event,raw);if(!result){unresolved++;continue;}
         if(!(s.bot instanceof EliteBot&&s.bot.runId===event.runId&&s.bot.reconcileContract(event.contractId,result))){
-          const record=recoveredTrade(event,result);checkpointEliteTrade(record);if(!get().trades.some(t=>t.contractId===record.contractId&&t.accountLoginid===account&&t.mode===record.mode)){await appendTrades([record]);set({trades:[record,...get().trades].slice(0,5000)});}
+          const record=recoveredTrade(event,result);checkpointEliteTrade(record);if(!get().trades.some(t=>t.contractId===record.contractId&&t.accountLoginid===account&&t.mode===record.mode)){await appendTrades([record]);set({trades:[record,...get().trades].slice(0,5000),dailyRisk:mergeDailyRisk(get().dailyRisk,[record])});}
           const reconciled:ExecutionEvent={...event,id:`reconciled:${Date.now()}:${event.contractId}`,at:Date.now(),phase:'settled',outcomeUnresolved:false,profit:result.profit,contractValue:result.payout,entryPrice:result.entryPrice,exitPrice:result.exitPrice,detail:'Actual terminal broker contract reconciled; no order placed.'};
           checkpointEliteEvent(reconciled);await appendExecutionEvent(reconciled);set({execution:reconciled,executionJournal:[reconciled,...get().executionJournal].slice(0,500)});
         }
@@ -1015,6 +1032,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
     const base = get().session?.balance ?? 0;
     set(() => ({ trades: [], botRuns: 0, metrics: computeMetrics([], base) }));
     get().risk.resetAll(base);
+    get().risk.restoreDailyPnl(dailyRiskPnl(get().dailyRisk,get().session?.loginid,get().settings.mode,get().session?.currency));
     set({ riskSnapshot: get().risk.getSnapshot() });
     get().pushLog('warn', 'Trade history cleared.');
   },
@@ -1027,6 +1045,7 @@ export const useApp = create<State & Actions>()((set, get) => ({
   rebaseToAccount() {
     const base = get().session?.balance ?? 0;
     get().risk.resetAll(base);
+    get().risk.restoreDailyPnl(dailyRiskPnl(get().dailyRisk,get().session?.loginid,get().settings.mode,get().session?.currency));
     set({ metrics: computeMetrics(get().trades, base), riskSnapshot: get().risk.getSnapshot() });
   },
 

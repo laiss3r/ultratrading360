@@ -1,0 +1,12 @@
+import {it,expect,vi,beforeEach,afterEach} from 'vitest';
+const state=vi.hoisted(()=>({data:new Map<string,unknown>()}));
+vi.mock('idb-keyval',()=>({get:vi.fn(async(k:string)=>state.data.get(k)),set:vi.fn(async(k:string,v:unknown)=>{state.data.set(k,v);}),del:vi.fn(async(k:string)=>{state.data.delete(k);}),keys:vi.fn(async()=>[...state.data.keys()]),update:vi.fn(async(k:string,fn:(v:unknown)=>unknown)=>{state.data.set(k,fn(state.data.get(k)));})}));
+import {appendTrades,clearTrades,listTrades,recordDailyTrades} from './db';
+import {dailyRiskPnl} from '../engine/daily-risk';
+import type {TradeRecord} from '../engine/bot';
+const trade=(id=1):TradeRecord=>({id:String(id),contractId:id,accountLoginid:'A',currency:'USD',mode:'deriv_demo',source:'deriv_live',profit:-1,closedAt:Date.parse('2026-11-03T12:00:00Z')} as TradeRecord);
+beforeEach(()=>{state.data.clear();vi.stubGlobal('indexedDB',{});});afterEach(()=>vi.unstubAllGlobals());
+it('history clearing does not erase durable daily risk',async()=>{await appendTrades([trade()]);await clearTrades();expect(await listTrades()).toEqual([]);expect(dailyRiskPnl(await recordDailyTrades([]),'A','deriv_demo','USD','2026-11-03')).toBe(-1);});
+it('concurrent contributions and repeat persistence remain idempotent',async()=>{await Promise.all([appendTrades([trade(1)]),appendTrades([trade(2)])]);await appendTrades([trade(1)]);expect(dailyRiskPnl(await recordDailyTrades([]),'A','deriv_demo','USD','2026-11-03')).toBe(-2);});
+it('corrupt stored risk refuses the write rather than silently resetting the book',async()=>{state.data.set('risk:daily-book',{corrupt:123});await expect(appendTrades([trade()])).rejects.toThrow();expect(state.data.has('trade:1')).toBe(false);});
+it('unavailable browser persistence refuses settlement append',async()=>{vi.stubGlobal('indexedDB',undefined);await expect(appendTrades([trade()])).rejects.toThrow(/unavailable/);});

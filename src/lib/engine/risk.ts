@@ -125,6 +125,12 @@ export class RiskManager {
     };
   }
 
+  /** Restore only this account/currency UTC day's recorded results before a new run. */
+  restoreDailyPnl(pnl:number,date=utcDate()){
+    if(!Number.isFinite(pnl)||!/^\d{4}-\d{2}-\d{2}$/.test(date))throw Error('Invalid daily risk snapshot.');
+    this.snap.dailyPnl=pnl;this.snap.dailyDate=date;
+  }
+
   getSnapshot(): RiskSnapshot {
     return { ...this.snap };
   }
@@ -347,4 +353,22 @@ function refuse(requestedStake: number, reasons: string[], halt: boolean, haltRe
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+/** Runtime validation shared by the editor and execution admission. */
+export function validateRiskLimits(limits:RiskLimits):string[]{
+ const errors:string[]=[];
+ for(const key of ['minStake','maxStake','maxOpenExposure','maxSessionExposure','maxSessionLoss','maxDailyLoss'] as const)if(!Number.isFinite(limits[key])||limits[key]<=0)errors.push(`${key} must be a finite positive amount.`);
+ if(!Number.isInteger(limits.maxTrades)||limits.maxTrades<1)errors.push('Maximum entries must be a positive whole number.');
+ if(!Number.isFinite(limits.maxSessionProfit)||limits.maxSessionProfit<0)errors.push('Profit target must be finite and non-negative.');
+ if(!Number.isFinite(limits.maxDrawdownPct)||limits.maxDrawdownPct<0||limits.maxDrawdownPct>1)errors.push('Drawdown must be between 0% and 100%.');
+ if(limits.maxStake<limits.minStake)errors.push('Maximum stake must be at least the minimum.');
+ if(typeof limits.tradingEnabled!=='boolean'||typeof limits.realTradingAcknowledged!=='boolean')errors.push('Execution permissions must be explicit booleans.');
+ return errors;
+}
+/** Numeric edits must never restore an old copy of execution permission flags. */
+export function mergeNumericRiskLimits(current:RiskLimits,draft:RiskLimits):RiskLimits{
+ const result={...current};
+ for(const key of ['minStake','maxStake','maxOpenExposure','maxSessionExposure','maxSessionLoss','maxDailyLoss','maxTrades','maxSessionProfit','maxDrawdownPct'] as const)result[key]=draft[key];
+ return result;
 }

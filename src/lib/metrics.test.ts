@@ -152,3 +152,9 @@ it('counts actual partial gross returns on losing sold contracts and separates z
  const m=computeMetrics([tr({won:false,stake:1,payout:.5,profit:-.5}),tr({won:false,stake:1,payout:1,profit:0})]);
  expect(m.totalPayout).toBe(1.5);expect(m.netProfit).toBe(-.5);expect(m.losses).toBe(1);expect(m.wins).toBe(0);expect(m.settledCount).toBe(2);
 });
+
+describe('professional reporting regressions',()=>{
+ it('uses settlement chronology even when supplied newest first',()=>{const rows=[tr({profit:10,closedAt:1}),tr({profit:-20,closedAt:2}),tr({profit:30,closedAt:3})];expect(computeMetrics(rows,100).maxDrawdown).toBe(20);expect(computeMetrics([...rows].reverse(),100)).toEqual(computeMetrics(rows,100));});
+ it('preserves the worst percentage when a later absolute drawdown is larger',()=>{const result=drawdown([-50,150,-60],100);expect(result.maxDrawdown).toBe(60);expect(result.maxDrawdownPct).toBe(.5);});
+ it('zero net is neutral and breaks winning and losing streaks',()=>{const result=computeMetrics([tr({profit:-1}),tr({profit:0,won:false}),tr({profit:-1}),tr({profit:1,won:false}),tr({profit:0,won:true}),tr({profit:1})]);expect(result.wins).toBe(2);expect(result.losses).toBe(2);expect(result.zeroNet).toBe(2);expect(result.maxConsecutiveLosses).toBe(1);expect(result.maxConsecutiveWins).toBe(1);});
+});

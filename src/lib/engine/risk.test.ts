@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_RECOVERY, DEFAULT_RISK_LIMITS, RiskManager, type RiskLimits } from './risk';
+import { DEFAULT_RECOVERY, DEFAULT_RISK_LIMITS, RiskManager,validateRiskLimits,mergeNumericRiskLimits, type RiskLimits } from './risk';
 
 const enabled = (patch: Partial<RiskLimits> = {}): RiskLimits => ({
   ...DEFAULT_RISK_LIMITS,
@@ -299,4 +299,13 @@ describe('take-profit halt (maxSessionProfit)', () => {
     expect(snap.haltReason).toBeUndefined();
     expect(r.evaluate(1, 'deriv_demo').allowed).toBe(true);
   });
+});
+
+
+describe('persistent daily admission and safe configuration',()=>{
+ it('restores daily losses into a new run and survives session reset',()=>{const rm=new RiskManager(enabled({maxDailyLoss:10}));rm.restoreDailyPnl(-10);expect(rm.evaluate(1,'deriv_demo').haltReason).toBe('daily_loss');rm.resetSession();expect(rm.evaluate(1,'deriv_demo').haltReason).toBe('daily_loss');});
+ it('does not restore yesterday’s daily losses into today',()=>{const rm=new RiskManager(enabled());rm.restoreDailyPnl(-999,'2000-01-01');expect(rm.evaluate(1,'deriv_demo').allowed).toBe(true);});
+ it('numeric form saves preserve current Stop and consent permissions',()=>{const saved=mergeNumericRiskLimits(enabled({tradingEnabled:false,realTradingAcknowledged:false}),enabled({tradingEnabled:true,realTradingAcknowledged:true,maxDailyLoss:3}));expect(saved.tradingEnabled).toBe(false);expect(saved.realTradingAcknowledged).toBe(false);expect(saved.maxDailyLoss).toBe(3);});
+ it.each([{maxStake:NaN},{maxDrawdownPct:NaN},{maxDrawdownPct:1.1},{maxTrades:1.2},{maxSessionProfit:Infinity},{maxDailyLoss:0},{maxStake:.01}])('rejects invalid numeric risk configuration %j',patch=>{expect(validateRiskLimits(enabled(patch)).length).toBeGreaterThan(0);});
+ it('accepts the normal defaults',()=>{expect(validateRiskLimits(enabled())).toEqual([]);});
 });

@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react';
 import { Download, Play } from 'lucide-react';
 import { useApp } from '@/state/store';
+import type {TradeRecord} from '@/lib/engine/bot';
 import type { Quote } from '@/lib/engine/provider';
 import { BrokerTransactions } from './ExecutionConsole';
 import { Button, Empty, Notice, Panel, Toggle } from './ui';
@@ -84,14 +85,14 @@ export function TradeTable({ limit = 100 }: { limit?: number }) {
   return <BrokerTransactions records={filtered}/>;
 }
 
-export function ExportTrades() {
+export function ExportTrades({records,disabled=false}:{records?:TradeRecord[];disabled?:boolean}={}) {
   const exportCsv=()=>{
     const mode=useApp.getState().settings.mode;
-    const clean=(v:unknown)=>`"${String(v??'').replace(/^[=+@-]/,"'").replaceAll('"','""')}"`;
+    const clean=(v:unknown)=>{const raw=String(v??''),safe=typeof v==='string'&&/^\s*[=+@-]/.test(raw)?"'"+raw:raw;return `"${safe.replaceAll('"','""')}"`;};
     const account=useApp.getState().session?.loginid;
-    const rows=useApp.getState().trades.filter((t)=>t.mode===mode&&(!!account&&t.accountLoginid===account)).map((t)=>[new Date(t.closedAt).toISOString(),t.id,t.strategyName,t.symbol,t.contractType,t.stake,t.profit,t.won,t.mode,t.source,t.accountLoginid??'Unattributed',t.contractId??'',t.entryPrice??'',t.exitPrice??'',t.duration??'']);
-    const csv=[['closed_at','id','strategy','symbol','contract','stake','profit','won','mode','source','account','contract_id','entry_spot','exit_spot','duration'],...rows].map((r)=>r.map(clean).join(',')).join('\n');
-    const url=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));const a=document.createElement('a');a.href=url;a.download='ultratrading-trades.csv';a.click();URL.revokeObjectURL(url);
+    const rows=(records??useApp.getState().trades).filter((t)=>t.mode===mode&&(!!account&&t.accountLoginid===account)).map((t)=>[new Date(t.closedAt).toISOString(),t.id,t.strategyName,t.symbol,t.contractType,t.stake,t.profit,t.won,t.mode,t.source,t.accountLoginid??'Unattributed',t.contractId??'',t.entryPrice??'',t.exitPrice??'',t.duration??'',t.currency??'',t.payout,t.error??'',t.timing?.proposalMs??'',t.timing?.buyAckMs??'',t.timing?.quoteToReceiptMs??'']);
+    const csv=[['closed_at','id','strategy','symbol','contract','stake','profit','won','mode','source','account','contract_id','entry_spot','exit_spot','duration','currency','gross_payout','error','pricing_ms','buy_ack_ms','quote_to_receipt_ms'],...rows].map((r)=>r.map(clean).join(',')).join('\n');
+    const url=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));const a=document.createElement('a');a.href=url;a.download=`ultratrading-${account??'no-account'}-${mode}-trades.csv`;a.click();URL.revokeObjectURL(url);
   };
-  return <Button variant="secondary" onClick={exportCsv}><Download size={15}/>Export CSV</Button>;
+  return <Button variant="secondary" disabled={disabled} title={records?"Export all matching report records":"Export loaded account records; use History for the full filtered browser ledger"} onClick={exportCsv}><Download size={15}/>Export CSV</Button>;
 }

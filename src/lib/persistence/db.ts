@@ -1,3 +1,4 @@
+import {mergeDailyRisk,validateDailyRiskBook,type DailyRiskBook} from '../engine/daily-risk';
 import type { ExecutionEvent } from '../engine/execution';
 import { get, set, del, keys, update } from 'idb-keyval';
 import type { Strategy } from '../engine/strategies';
@@ -99,7 +100,9 @@ export async function deleteStrategy(id: string): Promise<void> {
 }
 
 export async function appendTrades(trades: TradeRecord[]): Promise<void> {
-  if (!(await available()) || trades.length === 0) return;
+  if (trades.length === 0) return;
+  if (!(await available()))throw Error('Browser storage is unavailable; daily risk cannot be saved.');
+  await recordDailyTrades(trades);
   await Promise.all(trades.map((t) => set(PREFIX.trade + t.id, t)));
 }
 
@@ -149,4 +152,12 @@ export async function loadSessionResets():Promise<Record<string,number>>{
 }
 export async function saveSessionResets(resets:Record<string,number>):Promise<void>{
   if(await available())await set('execution:resets',resets);
+}
+
+/** Atomic account/day contract contributions survive history/view resets. */
+export async function recordDailyTrades(trades:TradeRecord[]):Promise<DailyRiskBook>{
+ if(!(await available()))return mergeDailyRisk({},trades);
+ let book:DailyRiskBook={};
+ await update<DailyRiskBook>('risk:daily-book',old=>{book=mergeDailyRisk(validateDailyRiskBook(old),trades);return book;});
+ return book;
 }

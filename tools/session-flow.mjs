@@ -112,7 +112,7 @@ try {
   check((await consolePanel().getByText('No. of runs',{exact:true}).locator('..').innerText()).includes('0'), 'reset clears displayed run totals without inventing a session');
   if(await consolePanel().count())await page.getByRole('button',{name:'Collapse trading session'}).click();
   await navigate('/history');
-  check(await main.locator('tbody tr').count() === 3, 'view reset preserves broker transaction history');
+  check(await main.locator('[data-account-ledger] tbody tr').count() === 3, 'view reset preserves broker transaction history');
   await navigate('/overlord');
   await page.reload(); await accountButton().waitFor();
   await page.getByRole('button',{name:/Expand trading session/}).click();
@@ -125,7 +125,7 @@ try {
   await page.getByRole('menu').waitFor({ state: 'hidden' });
   if(await consolePanel().count())await page.getByRole('button',{name:'Collapse trading session'}).click();
   await navigate('/history');
-  check(await main.locator('tbody tr').count() === 0, 'switching accounts cannot inherit another account transactions');
+  check(await main.locator('[data-account-ledger] tbody tr').count() === 0, 'switching accounts cannot inherit another account transactions');
   // Fresh run: Stop must retain an already accepted contract until actual settlement.
   await accountButton().click();
   await page.getByRole('menuitemradio').filter({ hasText: loginid }).click();

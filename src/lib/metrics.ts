@@ -6,6 +6,7 @@ export interface PerformanceMetrics {
   errorCount: number;
   wins: number;
   losses: number;
+  zeroNet: number;
   winRate: number;
   totalStaked: number;
   totalPayout: number;
@@ -32,14 +33,14 @@ export interface PerformanceMetrics {
  * Conventions:
  *  - profit = payout - stake on a win, -stake on a loss (taken from the settled contract,
  *    never recomputed from an assumed payout).
- *  - profitFactor = grossWin / |grossLoss|, null when there are no losses.
+ *  - profitFactor = grossWin / |grossLoss|; Infinity for wins without losses, null for no gains or losses.
  *  - drawdown is measured on the realised equity curve, peak-to-trough, in currency and %.
  *  - EV per trade is the mean realised profit — which, unlike win rate, already accounts for
  *    the payout asymmetry. A 90% win rate at 1.05x payout is a losing proposition and this
  *    metric shows it.
  */
 export function computeMetrics(trades: TradeRecord[], startingBalance = 0): PerformanceMetrics {
-  const settled = trades.filter((t) => !t.error);
+  const settled = trades.filter((t) => !t.error).sort((a,b)=>a.closedAt-b.closedAt);
   const errors = trades.filter((t) => !!t.error);
   const wins = settled.filter((t) => t.profit>0);
   const losses = settled.filter((t) => t.profit<0);
@@ -55,7 +56,7 @@ export function computeMetrics(trades: TradeRecord[], startingBalance = 0): Perf
     startingBalance,
   );
 
-  const { maxConsecutiveLosses, maxConsecutiveWins } = streaks(settled.map((t) => t.won));
+  const { maxConsecutiveLosses, maxConsecutiveWins } = streaks(settled.map((t) => Math.sign(t.profit)));
 
   const ending = round2(startingBalance + netProfit);
   return {
@@ -64,6 +65,7 @@ export function computeMetrics(trades: TradeRecord[], startingBalance = 0): Perf
     errorCount: errors.length,
     wins: wins.length,
     losses: losses.length,
+    zeroNet:settled.filter(t=>t.profit===0).length,
     winRate: settled.length ? wins.length / settled.length : 0,
     totalStaked,
     totalPayout,
@@ -99,8 +101,8 @@ export function drawdown(profits: number[], startingBalance = 0) {
     const dd = peak - equity;
     if (dd > maxDD) {
       maxDD = dd;
-      maxDDPct = peak > 0 ? dd / peak : 0;
     }
+    if(peak>0)maxDDPct=Math.max(maxDDPct,dd/peak);
   }
   return { maxDrawdown: maxDD, maxDrawdownPct: maxDDPct, endingBalance: round2(equity), curve };
 }
@@ -109,21 +111,21 @@ export function equityCurve(profits: number[], startingBalance = 0): number[] {
   return drawdown(profits, startingBalance).curve;
 }
 
-function streaks(outcomes: boolean[]) {
+function streaks(outcomes: number[]) {
   let maxL = 0;
   let maxW = 0;
   let cl = 0;
   let cw = 0;
   for (const w of outcomes) {
-    if (w) {
+    if (w>0) {
       cw++;
       cl = 0;
       maxW = Math.max(maxW, cw);
-    } else {
+    } else if(w<0) {
       cl++;
       cw = 0;
       maxL = Math.max(maxL, cl);
-    }
+    } else {cl=0;cw=0;}
   }
   return { maxConsecutiveLosses: maxL, maxConsecutiveWins: maxW };
 }
