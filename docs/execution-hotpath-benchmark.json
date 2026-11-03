@@ -1,0 +1,18 @@
+{
+  "synthetic": true,
+  "storageAdapter": "in-memory, actual JSON CPU; not browser disk or broker latency",
+  "baselineCommit": "5365fd5fbf90188aba268d3362c1169839189b36",
+  "retainedTrades": 100,
+  "payloadBytes": 83606,
+  "samples": 50,
+  "before": {
+    "preProposalMedianMs": 0.5699989999999957,
+    "throughBuyingMarkerMedianMs": 0.8827220000000011,
+    "writesPerEntry": 3
+  },
+  "after": {
+    "preProposalMedianMs": 0.0018059999999877618,
+    "throughBuyingMarkerMedianMs": 0.29159299999997756,
+    "writesPerEntry": 1
+  }
+}

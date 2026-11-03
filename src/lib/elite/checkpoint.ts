@@ -14,6 +14,9 @@ export function loadEliteCheckpoint():Checkpoint{
  try{const parsed=JSON.parse(localStorage.getItem(KEY)??'{}');return {events:Array.isArray(parsed.events)?parsed.events.filter((e:ExecutionEvent)=>e.tool==='elite'&&typeof e.runId==='string'&&typeof e.at==='number'):[],trades:Array.isArray(parsed.trades)?parsed.trades.filter((t:TradeRecord)=>t.source==='deriv_live'&&typeof t.runId==='string'&&t.runId.startsWith('elite_')&&Number.isFinite(t.profit)):[]};}catch{return {events:[],trades:[]};}
 }
 export function checkpointEliteEvent(event:ExecutionEvent){
+ // These pre-submission notices have no broker exposure to recover. The ordinary
+ // async journal retains them; the first buying marker still writes before send.
+ if(['qualified','pricing'].includes(event.phase)&&event.contractId===undefined&&!event.purchaseSubmitted&&!event.outcomeUnresolved)return;
  if(typeof localStorage==='undefined')return;
  // Tick progress/live mark-to-market updates do not change receipt durability.
  // Skip only when storage still contains our exact last successful write (cross-tab safe).
@@ -21,7 +24,8 @@ export function checkpointEliteEvent(event:ExecutionEvent){
  if(event.phase==='open'&&lastStorage===localStorage&&receiptFingerprints.get(key)===signature&&localStorage.getItem(KEY)===lastSavedRaw)return;
  const data=loadEliteCheckpoint(),same=(e:ExecutionEvent)=>e.runId===event.runId&&e.operationId===event.operationId&&e.accountLoginid===event.accountLoginid&&e.mode===event.mode;
  data.events=[event,...data.events.filter(e=>!same(e))];
- const pending=data.events.filter(e=>e.phase!=='settled'&&(e.contractId||e.purchaseSubmitted||e.outcomeUnresolved)),closed=data.events.filter(e=>!pending.includes(e)).slice(0,500);
+ const pending:ExecutionEvent[]=[],closed:ExecutionEvent[]=[];
+ for(const e of data.events){if(e.phase!=='settled'&&(e.contractId||e.purchaseSubmitted||e.outcomeUnresolved))pending.push(e);else if(closed.length<500)closed.push(e);}
  data.events=[...pending,...closed];saveCheckpoint(data);receiptFingerprints.set(key,signature);if(receiptFingerprints.size>500)receiptFingerprints.delete(receiptFingerprints.keys().next().value!);
 }
 export function checkpointEliteTrade(trade:TradeRecord){if(typeof localStorage==='undefined')return;const data=loadEliteCheckpoint();data.trades=[trade,...data.trades.filter(t=>t.id!==trade.id)].slice(0,100);saveCheckpoint(data);}

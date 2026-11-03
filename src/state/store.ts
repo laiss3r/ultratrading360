@@ -918,11 +918,10 @@ export const useApp = create<State & Actions>()((set, get) => ({
       onExecution:(e)=>{
         if(e.tool==='elite'){try{checkpointEliteEvent(e);}catch{get().pushLog('error','Elite receipt checkpoint could not be saved. New buys are blocked; keep this tab open to reconcile.');if(e.phase==='buying')throw new OrderCancelledError();if(e.phase==='open')get().stopBot('Receipt durability failed; accepted contracts must settle before closing.');}}
         const previous=e.operationId?get().executionJournal.find(previous=>previous.runId===e.runId&&previous.operationId===e.operationId):get().execution;
-        set({execution:e});
-        if(previous?.phase!==e.phase||previous?.contractId!==e.contractId||previous?.detail!==e.detail){
-          set({executionJournal:[e,...get().executionJournal].slice(0,500)});
-          void appendExecutionEvent(e).catch(()=>get().pushLog('warn','Journal persistence failed; broker execution state remains visible.'));
-        }
+        const journalChanged=previous?.phase!==e.phase||previous?.contractId!==e.contractId||previous?.detail!==e.detail;
+        // One notification: subscribers never observe the new execution with an old ledger.
+        set(journalChanged?{execution:e,executionJournal:[e,...get().executionJournal].slice(0,500)}:{execution:e});
+        if(journalChanged)void appendExecutionEvent(e).catch(()=>get().pushLog('warn','Journal persistence failed; broker execution state remains visible.'));
       },
       onStateChange: (st, detail) => {
         set({ botState: st, botDetail: detail ?? '' });
